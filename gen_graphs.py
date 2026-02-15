@@ -27,16 +27,11 @@ ALGO_DOCS = {
     '''),
     'lineaire': dcc.Markdown(r'''
         #### Fenêtre Glissante
-        **Stratégie :**
-        Une fenêtre de taille $N/2$ se déplace de gauche à droite.
-        * **Numérotation** : Ordre relatif à l'intérieur de la fenêtre (1, 2, 3...).
+        **Fonctionnalité :**
+        * **Arrêt sur Panne :** La simulation se met en pause automatiquement dès qu'une sonde échoue (rouge).
+        * **Reprise :** Cliquez sur "Reprendre" pour continuer le diagnostic.
     ''', mathjax=True),
-    'complet': dcc.Markdown(r'''
-        #### Hub & Spoke + Cycles
-        **Stratégie :**
-        1. **Hub (Star)** : Test des liens connectés au nœud 0.
-        2. **Cycles** : Test des liens distants $(u, v)$ via le chemin $0 \to u \to v \to 0$.
-    ''', mathjax=True),
+    'complet': dcc.Markdown(r'''#### Hub & Spoke + Cycles'''),
     'arbre': dcc.Markdown(r'''#### Diagnostic Arbre''')
 }
 
@@ -82,8 +77,6 @@ class NetworkEngine:
                 path_aller = self._get_path(0, start)
                 segment_window = list(range(start + 1, end + 1))
                 path_retour = self._get_path(end, 0)
-                
-                # Construction du chemin sans doublons aux jonctions
                 if start == 0:
                     full_path = [0] + segment_window + path_retour[1:]
                 else:
@@ -96,42 +89,32 @@ class NetworkEngine:
                     'window_nodes': (start, end)
                 })
 
-        # --- GRILLE (ZIGZAG) ---
+        # --- GRILLE ---
         elif self.type == 'grille':
             s = int(math.sqrt(self.n))
-            # Axes de référence
             self.probes.append({'type': 'AXIS', 'path': [(0,c) for c in range(s)], 'name': 'Axe Ligne 0'})
             self.probes.append({'type': 'AXIS', 'path': [(r,0) for r in range(s)], 'name': 'Axe Colonne 0'})
-            # Zigzags Horizontaux
             for r in range(1, s):
                 for c in range(s-1):
-                    # Chemin spécifique 0->...->(r,c)->(r,c+1)->...->0
                     p = self._get_path((0,0), (0,c)) + self._get_path((0,c), (r,c))[1:] + [(r, c+1)] + self._get_path((r,c+1), (0,c+1))[1:] + self._get_path((0,c+1), (0,0))[1:]
                     self.probes.append({'type': 'LTP', 'path': p, 'name': f'Zigzag H ({r},{c})'})
-            # Zigzags Verticaux
             for c in range(1, s):
                 for r in range(s-1):
                     p = self._get_path((0,0), (r,0)) + self._get_path((r,0), (r,c))[1:] + [(r+1, c)] + self._get_path((r+1,c), (r+1,0))[1:] + self._get_path((r+1,0), (0,0))[1:]
                     self.probes.append({'type': 'LTP', 'path': p, 'name': f'Zigzag V ({r},{c})'})
 
-        # --- COMPLET (HUB & SPOKE) ---
+        # --- COMPLET ---
         elif self.type == 'complet':
-            # 1. Test de l'Etoile (Star)
             for i in range(1, self.n):
                 self.probes.append({'type': 'STAR', 'path': [0,i,0], 'name': f'Hub vers {i}'})
-            
-            # 2. Test des Cycles (Liens distants)
-            # On teste tous les liens (u, v) qui ne touchent pas 0
             for u in range(1, self.n):
                 for v in range(u+1, self.n):
-                    # Cycle 0 -> u -> v -> 0
                     self.probes.append({'type': 'CYCLE', 'path': [0, u, v, 0], 'name': f'Cycle {u}-{v}'})
 
         # --- ARBRE ---
         elif self.type == 'arbre':
             for i in range(1, self.n):
                 path = self._get_path(0, i)
-                # Aller-Retour simple sur la branche
                 self.probes.append({'type': 'TREE', 'path': path + path[-2::-1], 'name': f'Branche vers {i}'})
 
     def run_simulation(self, fault):
@@ -183,10 +166,18 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
             ]),
             
             html.Div(style={'backgroundColor': COLORS['card'], 'marginTop': '15px', 'padding': '20px', 'borderRadius': '8px'}, children=[
-                html.H6("Séquenceur de Sondes", style={'margin': '0 0 15px 0', 'fontWeight': 'bold', 'color': COLORS['text']}),
-                # Slider avec valeur de retour gérée
-                dcc.Slider(id='sim-slider', min=1, max=1, step=1, value=1, tooltip={"placement": "bottom", "always_visible": True}),
-                html.Div(id='sim-info', style={'textAlign': 'center', 'marginTop': '15px', 'fontWeight': 'bold', 'fontSize': '16px', 'color': COLORS['accent']})
+                html.H6("Contrôle Simulation", style={'margin': '0 0 15px 0', 'fontWeight': 'bold', 'color': COLORS['text']}),
+                
+                html.Div(style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '15px'}, children=[
+                    # Le bouton Play/Reprendre
+                    html.Button("▶️ Lancer", id='btn-play', style={'backgroundColor': COLORS['success'], 'color': 'white', 'border': 'none', 'marginRight': '20px', 'minWidth': '150px'}),
+                    dcc.Slider(id='sim-slider', min=1, max=1, step=1, value=1, tooltip={"placement": "bottom", "always_visible": True}, className='u-full-width'),
+                ]),
+                
+                html.Div(id='sim-info', style={'textAlign': 'center', 'fontWeight': 'bold', 'fontSize': '16px', 'color': COLORS['accent']}),
+                
+                # Timer 800ms
+                dcc.Interval(id='anim-interval', interval=800, n_intervals=0, disabled=True)
             ])
         ])
     ]),
@@ -196,48 +187,83 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
 @app.callback(
     [Output('graph', 'figure'), Output('st-topo', 'data'), Output('st-fault', 'data'),
      Output('fault', 'options'), Output('fault', 'value'),
-     Output('sim-slider', 'max'), Output('sim-slider', 'value'), # Ajout de 'value' ici pour reset
-     Output('sim-info', 'children'), Output('algo-doc', 'children')],
+     Output('sim-slider', 'max'), Output('sim-slider', 'value'), 
+     Output('sim-info', 'children'), Output('algo-doc', 'children'),
+     Output('anim-interval', 'disabled'), Output('btn-play', 'children')],
     [Input('btn-build', 'n_clicks'), Input('graph', 'clickData'), Input('fault', 'value'),
-     Input('sim-slider', 'value')],
+     Input('sim-slider', 'value'), Input('btn-play', 'n_clicks'), Input('anim-interval', 'n_intervals')],
     [State('topo', 'value'), State('n-slider', 'value'), State('st-topo', 'data'), State('st-fault', 'data')]
 )
-def update_all(b_build, click, f_val, s_val, topo, n, st_t, st_f):
+def update_all(b_build, click, f_val, s_val, b_play, n_intervals, topo, n, st_t, st_f):
     ctx_id = ctx.triggered_id
     fig = go.Figure()
     
-    # --- 1. INITIALISATION ---
-    # Si on clique sur "Construire" ou au démarrage -> On reset TOUT
+    # 1. Reset
+    anim_disabled = True # Par défaut on ne bouge pas
+    btn_text = "▶️ Lancer"
+
     if ctx_id == 'btn-build' or not st_t: 
-        st_t = {'type': topo, 'n': n}
-        st_f = None
-        f_val = None
-        s_val = 1 # Force le slider à revenir à 1
+        st_t = {'type': topo, 'n': n}; st_f = None; f_val = None; s_val = 1
     
-    # Gestion panne Grille (tuples)
     if st_f and st_t['type'] == 'grille' and isinstance(st_f[0], list):
          st_f = sorted((tuple(st_f[0]), tuple(st_f[1])), key=str)
 
-    # --- 2. MOTEUR & DONNÉES ---
+    # 2. Moteur
     eng = NetworkEngine(st_t['n'], st_t['type'])
     opts = [{'label': f"Lien {u} - {v}", 'value': str(sorted((u, v), key=str))} for u,v in eng.G.edges()]
     doc_text = ALGO_DOCS.get(st_t['type'], "Pas de documentation.")
 
-    # --- 3. GESTION INTERACTION CLICK / DROPDOWN ---
+    # 3. Interactions
     if ctx_id == 'graph' and click:
         try:
             p = click['points'][0]['customdata']
             if st_t['type'] == 'grille': p = [tuple(p[0]), tuple(p[1])]
             st_f = sorted(p, key=str); f_val = str(st_f)
+            s_val = 1 # Reset slider
         except: pass
     elif ctx_id == 'fault' and f_val:
         try:
             v = ast.literal_eval(f_val)
             if st_t['type'] == 'grille': v = [tuple(v[0]), tuple(v[1])]
             st_f = sorted(v, key=str)
+            s_val = 1 # Reset slider
         except: pass
 
-    # --- 4. CALCUL LAYOUT ---
+    # 4. Simulation & Animation
+    all_results = eng.run_simulation(st_f)
+    max_s = len(all_results)
+    if s_val is None: s_val = 1
+    
+    # -- Logique du bouton Play --
+    if ctx_id == 'btn-play':
+        anim_disabled = False # On lance
+        if s_val >= max_s: s_val = 1 # Restart si fin
+
+    # -- Logique du Timer --
+    elif ctx_id == 'anim-interval':
+        if s_val < max_s:
+            s_val += 1
+            # VERIFICATION : Si la nouvelle sonde (s_val) a échoué -> STOP
+            idx_zero = s_val - 1
+            if all_results[idx_zero]['failed']:
+                anim_disabled = True # Pause sur erreur
+                btn_text = "▶️ Reprendre"
+            else:
+                anim_disabled = False # Continue
+                btn_text = "⏸️ En cours..."
+        else:
+            anim_disabled = True # Fin
+            btn_text = "↺ Recommencer"
+
+    # -- Mise à jour texte bouton (hors timer) --
+    if anim_disabled:
+        if s_val >= max_s: btn_text = "↺ Recommencer"
+        elif s_val > 1 and all_results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
+        else: btn_text = "▶️ Lancer"
+    else:
+        btn_text = "⏸️ Stop" # Si ça tourne
+
+    # 5. Dessin
     pos = {}
     if st_t['type'] == 'lineaire':
         for node in eng.G.nodes(): pos[node] = (node, 0)
@@ -247,17 +273,15 @@ def update_all(b_build, click, f_val, s_val, topo, n, st_t, st_f):
     elif st_t['type'] == 'complet': pos = nx.circular_layout(eng.G)
     else: pos = nx.spring_layout(eng.G)
 
-    # --- 5. DESSIN DU FOND (ARÊTES) ---
+    # Fond
     edge_x, edge_y = [], []
     for u, v in eng.G.edges():
         x0, y0 = pos[u]; x1, y1 = pos[v]
         edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
-        # Zone cliquable invisible large
         fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], mode='lines', line=dict(width=10, color='rgba(0,0,0,0)'), hoverinfo='text', text=f"Lien {u}-{v}", customdata=[[u,v],[u,v],[u,v]], showlegend=False))
-    
     fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', line=dict(color=COLORS['edge_inactive'], width=2), hoverinfo='skip'))
 
-    # Panne (Croix rouge)
+    # Panne
     if st_f:
         try:
             u_f, v_f = st_f
@@ -266,53 +290,37 @@ def update_all(b_build, click, f_val, s_val, topo, n, st_t, st_f):
             fig.add_trace(go.Scatter(x=[(fx0+fx1)/2], y=[(fy0+fy1)/2], mode='markers', marker=dict(symbol='x', size=15, color=COLORS['fail'])))
         except: pass
 
-    # --- 6. SIMULATION SONDES ---
-    sim_info, max_s = "Aucune sonde générée", 1
-    
-    # Simulation de TOUTES les sondes
-    all_results = eng.run_simulation(st_f)
-    max_s = len(all_results)
-    
-    # Sécurité slider
-    if s_val is None: s_val = 1
+    # Sonde
+    sim_info = "Prêt."
     current_idx = min(s_val, max_s) - 1
-    
     if all_results:
         r = all_results[current_idx]
-        
         status_text = "PASSE ✅"
         col = COLORS['success']
         if st_f and r['failed']:
-            status_text = "ÉCHEC ❌"
+            status_text = "ÉCHEC (Arrêt Auto) ❌"
             col = COLORS['fail']
         elif not st_f:
-            status_text = "PASSE (Réseau Sain) ✅"
+            status_text = "PASSE ✅"
         
         sim_info = f"Sonde {current_idx + 1}/{max_s} : {r['probe']['name']} ➔ {status_text}"
         path = r['probe']['path']
 
-        # Trace Sonde
-        px, py = [], []
-        text_x, text_y, text_val = [], [], []
-        
-        # Rectangle pour linéaire
+        # Fenêtre
         if 'window_nodes' in r['probe'] and st_t['type'] == 'lineaire':
             ws, we = r['probe']['window_nodes']
-            fig.add_shape(type="rect",
-                x0=ws - 0.4, x1=we + 0.4, y0=-0.3, y1=0.3,
-                fillcolor=COLORS['window_highlight'], line=dict(width=0), layer="below"
-            )
+            fig.add_shape(type="rect", x0=ws - 0.4, x1=we + 0.4, y0=-0.3, y1=0.3, fillcolor=COLORS['window_highlight'], line=dict(width=0), layer="below")
 
+        # Chemin
+        px, py = [], []
+        text_x, text_y, text_val = [], [], []
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
             px.extend([pos[u][0], pos[v][0], None])
             py.extend([pos[u][1], pos[v][1], None])
             
-            # --- Etiquetage ---
             show_label = True
             lbl_txt = str(i + 1)
-            
-            # Logique spécifique Linéaire (Relatif + Masquage transport)
             if st_t['type'] == 'lineaire':
                 start_win, end_win = r['probe']['window_nodes']
                 is_in_window = (u >= start_win) and (v <= end_win)
@@ -322,31 +330,24 @@ def update_all(b_build, click, f_val, s_val, topo, n, st_t, st_f):
                 else:
                     show_label = False 
             
-            # Pour Complet/Arbre/Grille, on montre tout ou on peut simplifier
-            # Ici on laisse tout pour les autres topos car c'est utile de voir le chemin
-
             if show_label:
                 mx = (pos[u][0] + pos[v][0]) / 2
                 base_my = (pos[u][1] + pos[v][1]) / 2
                 offset = 0.2 if st_t['type'] == 'lineaire' else 0
-                text_x.append(mx)
-                text_y.append(base_my + offset)
-                text_val.append(lbl_txt)
+                text_x.append(mx); text_y.append(base_my + offset); text_val.append(lbl_txt)
 
-        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=3, color=col), opacity=0.8, name='Chemin Sonde'))
+        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=3, color=col), opacity=0.8, name='Chemin'))
         fig.add_trace(go.Scatter(x=text_x, y=text_y, mode='markers+text', text=text_val, textposition='middle center', textfont=dict(color='white', size=10, weight='bold'), marker=dict(size=18, color=col, line=dict(color='white', width=1)), hoverinfo='skip'))
 
-    # --- 7. NŒUDS ---
+    # Nœuds
     nxp = [pos[n][0] for n in eng.G.nodes()]
     nyp = [pos[n][1] for n in eng.G.nodes()]
     fig.add_trace(go.Scatter(x=nxp, y=nyp, mode='markers+text', text=[str(n) for n in eng.G.nodes()], textposition="middle center", textfont=dict(color='black', weight='bold'), marker=dict(size=25 if st_t['type'] == 'lineaire' else 14, color='white', line=dict(width=2, color=COLORS['text'])), hoverinfo='none'))
 
     y_range = [-0.5, 0.5] if st_t['type'] == 'lineaire' else None
     ratio = 1 if st_t['type'] == 'grille' else None
-
     fig.update_layout(showlegend=False, margin=dict(l=20,r=20,t=20,b=20), xaxis={'visible':False, 'fixedrange': True}, yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':ratio, 'range': y_range, 'fixedrange': True}, plot_bgcolor=COLORS['bg'])
     
-    # Retourne s_val dans l'Output pour forcer la mise à jour visuelle du slider
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, sim_info, doc_text
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, sim_info, doc_text, anim_disabled, btn_text
 
 if __name__ == '__main__': app.run(debug=True)
