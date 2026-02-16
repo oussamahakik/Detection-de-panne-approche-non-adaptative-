@@ -10,39 +10,57 @@ COLORS = {
     'bg': '#F4F7F6',
     'card': '#FFFFFF',
     'text': '#2C3E50',
-    'accent': '#3498DB',     
+    'accent': '#2980B9',     
     'success': '#27AE60',    
-    'fail': '#E74C3C',       
+    'fail': '#C0392B',       
     'edge_inactive': '#BDC3C7',
-    'window_highlight': 'rgba(52, 152, 219, 0.2)' 
+    'step_box': '#ECF0F1'
 }
 
 # --- DOCUMENTATION ---
 ALGO_DOCS = {
     'grille': dcc.Markdown(r'''
-        #### Zigzag (Manhattan)
-        **Stratégie :**
-        1. Validation des axes (Ligne 0, Col 0).
-        2. Balayage en Zigzag pour tester les liens internes.
+        #### Algorithme 2 : Grille Hiérarchique
+        **Stratégie :** Division par Axes et Groupes.
+        1. Validation des axes de référence (Col 0, Ligne 0).
+        2. Test global des lignes entières.
+        3. Test vertical simultané (échelle) de la k-ième arête de toutes les lignes.
+        4. Répétition pour les colonnes.
     '''),
     'lineaire': dcc.Markdown(r'''
-        #### Fenêtre Glissante
-        **Fonctionnalité :**
-        * **Arrêt sur Panne :** La simulation se met en pause automatiquement dès qu'une sonde échoue (rouge).
-        * **Reprise :** Cliquez sur "Reprendre" pour continuer le diagnostic.
+        #### Algorithme 1 : Fenêtre Glissante
+        **Stratégie :** Recouvrement Progressif.
+        Une fenêtre de taille $W \approx N/2$ se déplace le long de la ligne.
+        * Chaque sonde couvre un sous-ensemble contigu.
+        * L'intersection des échecs permet d'isoler le lien fautif.
     ''', mathjax=True),
-    'complet': dcc.Markdown(r'''#### Hub & Spoke + Cycles'''),
-    'arbre': dcc.Markdown(r'''#### Diagnostic Arbre''')
+    'complet': dcc.Markdown(r'''
+        #### Algorithme 3 : Hub & Spoke
+        **Stratégie :** Centre vers Périphérie.
+        1. **Phase Étoile :** Validation de tous les liens connectés au Hub (Nœud 0).
+        2. **Phase Cycle :** Validation des liens distants $(u,v)$ via le chemin $0 \to u \to v \to 0$.
+    ''', mathjax=True),
+    'arbre': dcc.Markdown(r'''
+        #### Algorithme 4 : Profondeur (Branche)
+        **Stratégie :** Racine vers Feuilles.
+        Le contrôleur (Racine) envoie une sonde vers chaque nœud du réseau.
+        * Si la sonde vers le père $u$ passe, mais celle vers le fils $v$ échoue, le lien $(u,v)$ est en panne.
+    ''', mathjax=True)
 }
 
-# --- 1. MOTEUR ALGORITHMIQUE ---
+# --- MOTEUR ALGORITHMIQUE UNIFIÉ ---
 class NetworkEngine:
     def __init__(self, n, topo):
         self.n = n
         self.type = topo
         self.G = self._build_graph()
         self.probes = []
-        self._gen_probes()
+        
+        # Génération selon la topologie
+        if self.type == 'grille': self._generate_grid_algo()
+        elif self.type == 'lineaire': self._generate_linear_algo()
+        elif self.type == 'complet': self._generate_complete_algo()
+        elif self.type == 'arbre': self._generate_tree_algo()
 
     def _build_graph(self):
         if self.type == 'lineaire': return nx.path_graph(self.n)
@@ -54,69 +72,135 @@ class NetworkEngine:
         return nx.Graph()
 
     def _get_path(self, u, v):
-        return nx.shortest_path(self.G, u, v)
+        try: return nx.shortest_path(self.G, u, v)
+        except: return []
 
-    def _gen_probes(self):
-        self.probes = []
+    def _add_probe(self, path, step_id, step_name, description):
+        self.probes.append({
+            'path': path,
+            'step_id': step_id,
+            'step_name': step_name,
+            'description': description,
+            'id': len(self.probes) + 1
+        })
+
+    # --- GENERATEURS DE SONDES ---
+
+    def _generate_linear_algo(self):
+        w = math.ceil(self.n / 2)
+        windows = []
+        # Calcul des fenêtres
+        for start in range(self.n):
+            end = start + w
+            if end >= self.n:
+                last_start = max(0, self.n - 1 - w)
+                last_end = self.n - 1
+                if [last_start, last_end] not in windows: windows.append([last_start, last_end])
+                break
+            windows.append([start, end])
         
-        # --- LINEAIRE ---
-        if self.type == 'lineaire':
-            w = math.ceil(self.n / 2)
-            windows = []
-            for start in range(self.n):
-                end = start + w
-                if end >= self.n:
-                    last_start = max(0, self.n - 1 - w)
-                    last_end = self.n - 1
-                    if [last_start, last_end] not in windows:
-                        windows.append([last_start, last_end])
-                    break
-                windows.append([start, end])
+        # Création des sondes
+        for idx, (start, end) in enumerate(windows):
+            path_aller = self._get_path(0, start)
+            segment_window = list(range(start + 1, end + 1))
+            path_retour = self._get_path(end, 0)
             
-            for idx, (start, end) in enumerate(windows):
-                path_aller = self._get_path(0, start)
-                segment_window = list(range(start + 1, end + 1))
-                path_retour = self._get_path(end, 0)
-                if start == 0:
-                    full_path = [0] + segment_window + path_retour[1:]
-                else:
-                    full_path = path_aller + segment_window + path_retour[1:]
-                
-                self.probes.append({
-                    'type': 'WIN',
-                    'path': full_path,
-                    'name': f'Fenêtre [{start}-{end}]',
-                    'window_nodes': (start, end)
-                })
+            full_path = ([0] + segment_window + path_retour[1:]) if start == 0 else (path_aller + segment_window + path_retour[1:])
+            
+            self._add_probe(full_path, 
+                            f"WIN-{idx+1}", 
+                            "Fenêtre Glissante", 
+                            f"Test du segment couvrant les nœuds {start} à {end}.")
 
-        # --- GRILLE ---
-        elif self.type == 'grille':
-            s = int(math.sqrt(self.n))
-            self.probes.append({'type': 'AXIS', 'path': [(0,c) for c in range(s)], 'name': 'Axe Ligne 0'})
-            self.probes.append({'type': 'AXIS', 'path': [(r,0) for r in range(s)], 'name': 'Axe Colonne 0'})
+    def _generate_complete_algo(self):
+        # 1. Phase Hub (Star)
+        for i in range(1, self.n):
+            self._add_probe([0, i, 0], 
+                            "STAR", 
+                            "Validation Hub", 
+                            f"Test du lien direct (Rayon) entre le Hub 0 et le Nœud {i}.")
+            
+        # 2. Phase Cycles
+        for u in range(1, self.n):
+            for v in range(u+1, self.n):
+                self._add_probe([0, u, v, 0], 
+                                "CYCLE", 
+                                "Triangulation", 
+                                f"Test du lien distant {u}-{v} via le cycle 0->{u}->{v}->0.")
+
+    def _generate_tree_algo(self):
+        # Dans un arbre, on teste le chemin de la racine vers chaque nœud
+        # Pour une meilleure visualisation, on peut trier par distance à la racine
+        nodes_by_depth = sorted(self.G.nodes(), key=lambda x: len(self._get_path(0, x)))
+        
+        for i in nodes_by_depth:
+            if i == 0: continue
+            path = self._get_path(0, i)
+            # Aller-Retour
+            full_path = path + path[-2::-1]
+            
+            self._add_probe(full_path, 
+                            "BRANCH", 
+                            "Sondage Profondeur", 
+                            f"Validation de la branche complète jusqu'au nœud {i}.")
+
+    def _generate_grid_algo(self):
+        s = int(math.sqrt(self.n))
+        origin = (0,0)
+
+        # 1a. Col 0 Globale
+        path = [(r, 0) for r in range(s)] + [(r, 0) for r in range(s-2, -1, -1)]
+        self._add_probe(path, "1a", "Axe Vertical", "Test global de la Colonne 0.")
+
+        # 1b. Col 0 Unitaire
+        for r in range(s-1):
+            p = self._get_path(origin, (r,0)) + [(r,1), (r+1,1)] + self._get_path((r+1,0), origin)
+            self._add_probe(p, "1b", "Détail Col 0", f"Test unitaire arête ({r},0)-({r+1},0).")
+
+        # 2a. Row 0 Globale
+        path = [(0, c) for c in range(s)] + [(0, c) for c in range(s-2, -1, -1)]
+        self._add_probe(path, "2a", "Axe Horizontal", "Test global de la Ligne 0.")
+
+        # 2b. Row 0 Unitaire
+        for c in range(s-1):
+            p = self._get_path(origin, (0,c)) + [(1,c), (1,c+1)] + self._get_path((0,c+1), origin)
+            self._add_probe(p, "2b", "Détail Row 0", f"Test unitaire arête (0,{c})-(0,{c+1}).")
+
+        # 3a. Lignes Globales
+        for r in range(1, s):
+            p = self._get_path(origin, (r,0)) 
+            p += [(r, c) for c in range(1, s)] 
+            p += [(r, c) for c in range(s-2, -1, -1)] 
+            p += self._get_path((r,0), origin)[1:]
+            self._add_probe(p, "3a", "Ligne Complète", f"Test global de la Ligne {r}.")
+
+        # 3b. Échelle Verticale
+        for k in range(s-1):
+            path = self._get_path(origin, (0,k))
             for r in range(1, s):
-                for c in range(s-1):
-                    p = self._get_path((0,0), (0,c)) + self._get_path((0,c), (r,c))[1:] + [(r, c+1)] + self._get_path((r,c+1), (0,c+1))[1:] + self._get_path((0,c+1), (0,0))[1:]
-                    self.probes.append({'type': 'LTP', 'path': p, 'name': f'Zigzag H ({r},{c})'})
+                if r % 2 != 0: path += self._get_path(path[-1], (r, k))[1:] + [(r, k+1)]
+                else: path += self._get_path(path[-1], (r, k+1))[1:] + [(r, k)]
+            path += self._get_path(path[-1], origin)[1:]
+            self._add_probe(path, "3b", "Échelle Verticale", f"Test simultané de la {k+1}ème arête de TOUTES les lignes.")
+
+        # 4a. Colonnes Globales
+        for c in range(1, s):
+            p = self._get_path(origin, (0,c))
+            p += [(r, c) for r in range(1, s)]
+            p += [(r, c) for r in range(s-2, -1, -1)]
+            p += self._get_path((0,c), origin)[1:]
+            self._add_probe(p, "4a", "Colonne Complète", f"Test global de la Colonne {c}.")
+
+        # 4b. Échelle Horizontale
+        for k in range(s-1):
+            path = self._get_path(origin, (k,0))
             for c in range(1, s):
-                for r in range(s-1):
-                    p = self._get_path((0,0), (r,0)) + self._get_path((r,0), (r,c))[1:] + [(r+1, c)] + self._get_path((r+1,c), (r+1,0))[1:] + self._get_path((r+1,0), (0,0))[1:]
-                    self.probes.append({'type': 'LTP', 'path': p, 'name': f'Zigzag V ({r},{c})'})
+                if c % 2 != 0: path += self._get_path(path[-1], (k, c))[1:] + [(k+1, c)]
+                else: path += self._get_path(path[-1], (k+1, c))[1:] + [(k, c)]
+            path += self._get_path(path[-1], origin)[1:]
+            self._add_probe(path, "4b", "Échelle Horizontale", f"Test simultané de la {k+1}ème arête de TOUTES les colonnes.")
 
-        # --- COMPLET ---
-        elif self.type == 'complet':
-            for i in range(1, self.n):
-                self.probes.append({'type': 'STAR', 'path': [0,i,0], 'name': f'Hub vers {i}'})
-            for u in range(1, self.n):
-                for v in range(u+1, self.n):
-                    self.probes.append({'type': 'CYCLE', 'path': [0, u, v, 0], 'name': f'Cycle {u}-{v}'})
-
-        # --- ARBRE ---
-        elif self.type == 'arbre':
-            for i in range(1, self.n):
-                path = self._get_path(0, i)
-                self.probes.append({'type': 'TREE', 'path': path + path[-2::-1], 'name': f'Branche vers {i}'})
-
+    # --- EXECUTION ---
     def run_simulation(self, fault):
         fsig = str(tuple(sorted(fault, key=str))) if fault else ""
         results = []
@@ -129,141 +213,187 @@ class NetworkEngine:
             results.append({'probe': probe, 'failed': failed})
         return results
 
-# --- 2. INTERFACE DASH ---
-mathjax_script = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/MathJax.js?config=TeX-MML-AM_CHTML'
-app = dash.Dash(__name__, external_scripts=[mathjax_script], external_stylesheets=['https://codepen.io/chriddyp/pen/bWLwgP.css'])
+# --- INTERFACE DASH ---
+app = dash.Dash(__name__)
 
 app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100vh', 'fontFamily': 'Segoe UI, sans-serif', 'padding': '20px'}, children=[
-    html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '8px', 'marginBottom': '20px'}, children=[
-        html.H2("Visualiseur de Sondes Optiques", style={'color': COLORS['text'], 'textAlign': 'center', 'fontWeight': 'bold', 'margin': '0'}),
+    
+    html.Div(style={'textAlign': 'center', 'marginBottom': '30px'}, children=[
+        html.H1("Simulateur de Diagnostic Optique", style={'color': COLORS['text'], 'marginBottom': '5px'}),
+        html.Div("Comparaison des stratégies de sondage par topologie", style={'color': '#7F8C8D'})
     ]),
-    html.Div(className='row', children=[
-        html.Div(className='four columns', children=[
-            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '8px', 'marginBottom': '20px'}, children=[
-                html.Label("1. Configuration", style={'fontWeight': 'bold', 'color': COLORS['accent']}),
-                dcc.Dropdown(id='topo', options=[
-                    {'label': 'Linéaire (Fenêtre Glissante)', 'value': 'lineaire'},
-                    {'label': 'Grille (Zigzag)', 'value': 'grille'},
-                    {'label': 'Complet (Hub & Cycles)', 'value': 'complet'},
-                    {'label': 'Arbre', 'value': 'arbre'}
-                ], value='lineaire', clearable=False),
+
+    html.Div(className='row', style={'display': 'flex', 'gap': '20px'}, children=[
+        
+        # COLONNE GAUCHE
+        html.Div(style={'flex': '1', 'maxWidth': '400px'}, children=[
+            
+            # Config
+            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)', 'marginBottom': '20px'}, children=[
+                html.H3("1. Configuration", style={'marginTop': 0, 'color': COLORS['accent'], 'fontSize': '18px'}),
                 
-                html.Label("Taille du réseau:", style={'marginTop': '15px'}),
-                dcc.Slider(id='n-slider', min=5, max=16, step=1, value=8, marks={5:'5', 8:'8', 12:'12', 16:'16'}),
-                html.Button("Générer Réseau", id='btn-build', style={'width':'100%', 'marginTop':'20px', 'backgroundColor': COLORS['accent'], 'color': 'white', 'border': 'none'}),
+                html.Label("Topologie :"),
+                dcc.Dropdown(id='topo', options=[
+                    {'label': 'Grille (LTP Hiérarchique)', 'value': 'grille'},
+                    {'label': 'Linéaire (Fenêtre Glissante)', 'value': 'lineaire'},
+                    {'label': 'Complet (Hub & Cycles)', 'value': 'complet'},
+                    {'label': 'Arbre (Profondeur)', 'value': 'arbre'}
+                ], value='grille', clearable=False),
+
+                html.Label("Taille du réseau (Nœuds) :", style={'marginTop': '10px'}),
+                dcc.Slider(id='n-slider', min=5, max=25, step=1, value=16, marks={5:'5', 10:'10', 16:'16', 25:'25'}),
+                
+                html.Button("Générer Réseau", id='btn-build', style={'width': '100%', 'marginTop': '15px', 'backgroundColor': COLORS['accent'], 'color': 'white', 'border': 'none', 'padding': '10px', 'borderRadius': '5px', 'cursor': 'pointer'}),
+                html.Hr(),
+                html.Label("2. Injecter une Panne :"),
+                dcc.Dropdown(id='fault', placeholder="Sélectionner une arête...", searchable=True),
             ]),
-            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '8px', 'marginBottom': '20px'}, children=[
-                html.Label("2. Panne (Optionnel)", style={'fontWeight': 'bold', 'color': COLORS['fail']}),
-                dcc.Dropdown(id='fault', placeholder="Simuler une coupure...", searchable=True),
-            ]),
-            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '8px'}, children=[
-                html.Div(id='algo-doc', style={'fontSize': '13px', 'textAlign': 'justify'})
-            ]),
-        ]),
-        html.Div(className='eight columns', children=[
-            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '10px', 'borderRadius': '8px', 'height': '60vh'}, children=[
-                dcc.Graph(id='graph', style={'height': '100%'}, config={'displayModeBar': False})
+
+            # Narratif
+            html.Div(style={'backgroundColor': COLORS['step_box'], 'padding': '20px', 'borderRadius': '10px', 'border': f'2px solid {COLORS["accent"]}'}, children=[
+                html.H3("Status de l'Algorithme", style={'marginTop': 0, 'color': COLORS['text'], 'fontSize': '18px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '10px'}),
+                html.Div(id='step-display', children=[html.P("En attente de simulation...", style={'color': '#7F8C8D'})])
             ]),
             
-            html.Div(style={'backgroundColor': COLORS['card'], 'marginTop': '15px', 'padding': '20px', 'borderRadius': '8px'}, children=[
-                html.H6("Contrôle Simulation", style={'margin': '0 0 15px 0', 'fontWeight': 'bold', 'color': COLORS['text']}),
-                
-                html.Div(style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '15px'}, children=[
-                    # Le bouton Play/Reprendre
-                    html.Button("▶️ Lancer", id='btn-play', style={'backgroundColor': COLORS['success'], 'color': 'white', 'border': 'none', 'marginRight': '20px', 'minWidth': '150px'}),
-                    dcc.Slider(id='sim-slider', min=1, max=1, step=1, value=1, tooltip={"placement": "bottom", "always_visible": True}, className='u-full-width'),
+            # Doc
+            html.Div(style={'marginTop': '20px', 'fontSize': '13px', 'color': '#555'}, children=[
+                html.Div(id='algo-doc')
+            ])
+        ]),
+
+        # COLONNE DROITE
+        html.Div(style={'flex': '2'}, children=[
+            # Graphique
+            html.Div(style={'backgroundColor': COLORS['card'], 'padding': '10px', 'borderRadius': '10px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)', 'height': '600px'}, children=[
+                dcc.Graph(id='graph', style={'height': '100%'}, config={'displayModeBar': False})
+            ]),
+
+            # Contrôles
+            html.Div(style={'backgroundColor': COLORS['card'], 'marginTop': '20px', 'padding': '20px', 'borderRadius': '10px', 'display': 'flex', 'alignItems': 'center', 'gap': '15px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'}, children=[
+                html.Button("▶️ Lecture", id='btn-play', style={'backgroundColor': COLORS['success'], 'color': 'white', 'border': 'none', 'padding': '10px 20px', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold'}),
+                html.Div(style={'flex': '1'}, children=[
+                    dcc.Slider(id='sim-slider', min=1, max=1, step=1, value=1, tooltip={"placement": "bottom", "always_visible": True}, marks=None)
                 ]),
-                
-                html.Div(id='sim-info', style={'textAlign': 'center', 'fontWeight': 'bold', 'fontSize': '16px', 'color': COLORS['accent']}),
-                
-                # Timer 800ms
-                dcc.Interval(id='anim-interval', interval=800, n_intervals=0, disabled=True)
+                html.Div(id='counter-display', style={'fontWeight': 'bold', 'color': COLORS['text'], 'minWidth': '80px', 'textAlign': 'right'})
             ])
         ])
     ]),
-    dcc.Store(id='st-topo'), dcc.Store(id='st-fault')
+
+    dcc.Store(id='st-topo'), dcc.Store(id='st-fault'),
+    dcc.Interval(id='anim-interval', interval=1000, n_intervals=0, disabled=True)
 ])
 
+# --- CALLBACKS ---
+
 @app.callback(
-    [Output('graph', 'figure'), Output('st-topo', 'data'), Output('st-fault', 'data'),
-     Output('fault', 'options'), Output('fault', 'value'),
-     Output('sim-slider', 'max'), Output('sim-slider', 'value'), 
-     Output('sim-info', 'children'), Output('algo-doc', 'children'),
-     Output('anim-interval', 'disabled'), Output('btn-play', 'children')],
-    [Input('btn-build', 'n_clicks'), Input('graph', 'clickData'), Input('fault', 'value'),
-     Input('sim-slider', 'value'), Input('btn-play', 'n_clicks'), Input('anim-interval', 'n_intervals')],
-    [State('topo', 'value'), State('n-slider', 'value'), State('st-topo', 'data'), State('st-fault', 'data')]
+    [Output('graph', 'figure'), 
+     Output('st-topo', 'data'), 
+     Output('st-fault', 'data'),
+     Output('fault', 'options'), 
+     Output('fault', 'value'),
+     Output('sim-slider', 'max'), 
+     Output('sim-slider', 'value'), 
+     Output('step-display', 'children'),
+     Output('counter-display', 'children'),
+     Output('algo-doc', 'children'),
+     Output('anim-interval', 'disabled'), 
+     Output('btn-play', 'children')],
+    [Input('btn-build', 'n_clicks'), 
+     Input('graph', 'clickData'), 
+     Input('fault', 'value'),
+     Input('sim-slider', 'value'), 
+     Input('btn-play', 'n_clicks'), 
+     Input('anim-interval', 'n_intervals')],
+    [State('topo', 'value'), 
+     State('n-slider', 'value'), 
+     State('st-topo', 'data'), 
+     State('st-fault', 'data')]
 )
-def update_all(b_build, click, f_val, s_val, b_play, n_intervals, topo, n, st_t, st_f):
+def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n_nodes, st_t, st_f):
     ctx_id = ctx.triggered_id
     fig = go.Figure()
     
-    # 1. Reset
-    anim_disabled = True # Par défaut on ne bouge pas
-    btn_text = "▶️ Lancer"
-
-    if ctx_id == 'btn-build' or not st_t: 
-        st_t = {'type': topo, 'n': n}; st_f = None; f_val = None; s_val = 1
+    # --- INIT / RESET ---
+    anim_disabled = True
+    btn_text = "▶️ Lecture"
     
-    if st_f and st_t['type'] == 'grille' and isinstance(st_f[0], list):
+    # Init Topologie
+    if ctx_id == 'btn-build' or not st_t:
+        # Ajustement taille pour Grille (Carré parfait)
+        if topo == 'grille':
+            s = int(math.sqrt(n_nodes))
+            n_final = s * s
+        else:
+            n_final = n_nodes
+            
+        st_t = {'n': n_final, 'type': topo}
+        st_f = None
+        f_val = None
+        s_val = 1
+    
+    # Gestion Panne
+    if st_f and isinstance(st_f[0], list):
          st_f = sorted((tuple(st_f[0]), tuple(st_f[1])), key=str)
 
-    # 2. Moteur
+    # --- MOTEUR ---
     eng = NetworkEngine(st_t['n'], st_t['type'])
     opts = [{'label': f"Lien {u} - {v}", 'value': str(sorted((u, v), key=str))} for u,v in eng.G.edges()]
-    doc_text = ALGO_DOCS.get(st_t['type'], "Pas de documentation.")
+    doc_text = ALGO_DOCS.get(st_t['type'], "")
 
-    # 3. Interactions
+    # --- INTERACTIONS ---
     if ctx_id == 'graph' and click:
         try:
             p = click['points'][0]['customdata']
-            if st_t['type'] == 'grille': p = [tuple(p[0]), tuple(p[1])]
-            st_f = sorted(p, key=str); f_val = str(st_f)
-            s_val = 1 # Reset slider
+            # Adaptation format tuple pour Grille vs Int pour autres
+            if st_t['type'] == 'grille':
+                st_f = sorted([tuple(p[0]), tuple(p[1])], key=str)
+            else:
+                st_f = sorted(p, key=str)
+            f_val = str(st_f)
+            s_val = 1
         except: pass
     elif ctx_id == 'fault' and f_val:
         try:
             v = ast.literal_eval(f_val)
-            if st_t['type'] == 'grille': v = [tuple(v[0]), tuple(v[1])]
-            st_f = sorted(v, key=str)
-            s_val = 1 # Reset slider
+            if st_t['type'] == 'grille':
+                st_f = sorted([tuple(v[0]), tuple(v[1])], key=str)
+            else:
+                st_f = sorted(v, key=str)
+            s_val = 1
         except: pass
 
-    # 4. Simulation & Animation
-    all_results = eng.run_simulation(st_f)
-    max_s = len(all_results)
+    # --- SIMULATION ---
+    results = eng.run_simulation(st_f)
+    max_s = len(results)
     if s_val is None: s_val = 1
-    
-    # -- Logique du bouton Play --
-    if ctx_id == 'btn-play':
-        anim_disabled = False # On lance
-        if s_val >= max_s: s_val = 1 # Restart si fin
 
-    # -- Logique du Timer --
+    # Animation
+    if ctx_id == 'btn-play':
+        anim_disabled = False
+        if s_val >= max_s: s_val = 1
     elif ctx_id == 'anim-interval':
         if s_val < max_s:
             s_val += 1
-            # VERIFICATION : Si la nouvelle sonde (s_val) a échoué -> STOP
-            idx_zero = s_val - 1
-            if all_results[idx_zero]['failed']:
-                anim_disabled = True # Pause sur erreur
+            # Arrêt sur erreur
+            if results[s_val - 1]['failed']:
+                anim_disabled = True
                 btn_text = "▶️ Reprendre"
             else:
-                anim_disabled = False # Continue
-                btn_text = "⏸️ En cours..."
+                anim_disabled = False
+                btn_text = "⏸️ Stop"
         else:
-            anim_disabled = True # Fin
-            btn_text = "↺ Recommencer"
-
-    # -- Mise à jour texte bouton (hors timer) --
+            anim_disabled = True
+            btn_text = "↺ Reset"
+    
     if anim_disabled:
-        if s_val >= max_s: btn_text = "↺ Recommencer"
-        elif s_val > 1 and all_results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
-        else: btn_text = "▶️ Lancer"
+        if s_val >= max_s: btn_text = "↺ Reset"
+        elif s_val > 1 and results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
+        else: btn_text = "▶️ Lecture"
     else:
-        btn_text = "⏸️ Stop" # Si ça tourne
+        btn_text = "⏸️ Stop"
 
-    # 5. Dessin
+    # --- VISUALISATION ---
+    # Layout
     pos = {}
     if st_t['type'] == 'lineaire':
         for node in eng.G.nodes(): pos[node] = (node, 0)
@@ -271,14 +401,13 @@ def update_all(b_build, click, f_val, s_val, b_play, n_intervals, topo, n, st_t,
         for node in eng.G.nodes(): pos[node] = (node[1], -node[0])
     elif st_t['type'] == 'arbre': pos = nx.kamada_kawai_layout(eng.G)
     elif st_t['type'] == 'complet': pos = nx.circular_layout(eng.G)
-    else: pos = nx.spring_layout(eng.G)
 
     # Fond
     edge_x, edge_y = [], []
     for u, v in eng.G.edges():
         x0, y0 = pos[u]; x1, y1 = pos[v]
         edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
-        fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], mode='lines', line=dict(width=10, color='rgba(0,0,0,0)'), hoverinfo='text', text=f"Lien {u}-{v}", customdata=[[u,v],[u,v],[u,v]], showlegend=False))
+        fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], mode='lines', line=dict(width=15, color='rgba(0,0,0,0)'), hoverinfo='text', text=f"Lien {u}-{v}", customdata=[[u,v],[u,v],[u,v]], showlegend=False))
     fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', line=dict(color=COLORS['edge_inactive'], width=2), hoverinfo='skip'))
 
     # Panne
@@ -291,63 +420,66 @@ def update_all(b_build, click, f_val, s_val, b_play, n_intervals, topo, n, st_t,
         except: pass
 
     # Sonde
-    sim_info = "Prêt."
-    current_idx = min(s_val, max_s) - 1
-    if all_results:
-        r = all_results[current_idx]
-        status_text = "PASSE ✅"
-        col = COLORS['success']
-        if st_f and r['failed']:
-            status_text = "ÉCHEC (Arrêt Auto) ❌"
-            col = COLORS['fail']
-        elif not st_f:
-            status_text = "PASSE ✅"
-        
-        sim_info = f"Sonde {current_idx + 1}/{max_s} : {r['probe']['name']} ➔ {status_text}"
-        path = r['probe']['path']
-
-        # Fenêtre
-        if 'window_nodes' in r['probe'] and st_t['type'] == 'lineaire':
-            ws, we = r['probe']['window_nodes']
-            fig.add_shape(type="rect", x0=ws - 0.4, x1=we + 0.4, y0=-0.3, y1=0.3, fillcolor=COLORS['window_highlight'], line=dict(width=0), layer="below")
-
-        # Chemin
-        px, py = [], []
-        text_x, text_y, text_val = [], [], []
-        for i in range(len(path)-1):
-            u, v = path[i], path[i+1]
-            px.extend([pos[u][0], pos[v][0], None])
-            py.extend([pos[u][1], pos[v][1], None])
-            
-            show_label = True
-            lbl_txt = str(i + 1)
-            if st_t['type'] == 'lineaire':
-                start_win, end_win = r['probe']['window_nodes']
-                is_in_window = (u >= start_win) and (v <= end_win)
-                is_forward = (v > u)
-                if is_in_window and is_forward:
-                    lbl_txt = str(u - start_win + 1)
-                else:
-                    show_label = False 
-            
-            if show_label:
-                mx = (pos[u][0] + pos[v][0]) / 2
-                base_my = (pos[u][1] + pos[v][1]) / 2
-                offset = 0.2 if st_t['type'] == 'lineaire' else 0
-                text_x.append(mx); text_y.append(base_my + offset); text_val.append(lbl_txt)
-
-        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=3, color=col), opacity=0.8, name='Chemin'))
-        fig.add_trace(go.Scatter(x=text_x, y=text_y, mode='markers+text', text=text_val, textposition='middle center', textfont=dict(color='white', size=10, weight='bold'), marker=dict(size=18, color=col, line=dict(color='white', width=1)), hoverinfo='skip'))
+    current_res = results[s_val - 1]
+    probe_data = current_res['probe']
+    is_failed = current_res['failed']
+    path = probe_data['path']
+    col = COLORS['fail'] if is_failed else COLORS['success']
+    
+    px, py = [], []
+    for node in path:
+        px.append(pos[node][0])
+        py.append(pos[node][1])
+    
+    fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=col), opacity=0.9, name='Sonde'))
+    
+    # Flèches
+    if len(path) > 1:
+        mid = len(path) // 2
+        fig.add_trace(go.Scatter(x=[px[0]], y=[py[0]], mode='markers', marker=dict(size=12, color=col, symbol='circle')))
+        # Petit indicateur de direction au milieu
+        fig.add_trace(go.Scatter(x=[px[mid]], y=[py[mid]], mode='markers', marker=dict(size=10, color=col, symbol='triangle-up'), showlegend=False))
 
     # Nœuds
     nxp = [pos[n][0] for n in eng.G.nodes()]
     nyp = [pos[n][1] for n in eng.G.nodes()]
-    fig.add_trace(go.Scatter(x=nxp, y=nyp, mode='markers+text', text=[str(n) for n in eng.G.nodes()], textposition="middle center", textfont=dict(color='black', weight='bold'), marker=dict(size=25 if st_t['type'] == 'lineaire' else 14, color='white', line=dict(width=2, color=COLORS['text'])), hoverinfo='none'))
+    fig.add_trace(go.Scatter(x=nxp, y=nyp, mode='markers+text', text=[str(n) for n in eng.G.nodes()], textposition="top center", textfont=dict(color=COLORS['text'], size=10), marker=dict(size=15, color='white', line=dict(width=2, color=COLORS['text'])), hoverinfo='none'))
 
     y_range = [-0.5, 0.5] if st_t['type'] == 'lineaire' else None
     ratio = 1 if st_t['type'] == 'grille' else None
-    fig.update_layout(showlegend=False, margin=dict(l=20,r=20,t=20,b=20), xaxis={'visible':False, 'fixedrange': True}, yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':ratio, 'range': y_range, 'fixedrange': True}, plot_bgcolor=COLORS['bg'])
-    
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, sim_info, doc_text, anim_disabled, btn_text
 
-if __name__ == '__main__': app.run(debug=True)
+    fig.update_layout(
+        margin=dict(l=20,r=20,t=20,b=20), 
+        xaxis={'visible':False, 'fixedrange': True}, 
+        yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':ratio, 'range': y_range, 'fixedrange': True}, 
+        plot_bgcolor=COLORS['bg'],
+        showlegend=False
+    )
+
+    # --- NARRATIF ---
+    status_icon = "❌ ÉCHEC" if is_failed else "✅ SUCCÈS"
+    status_color = COLORS['fail'] if is_failed else COLORS['success']
+
+    step_content = [
+        html.Div([
+            html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}),
+            html.Span(f"{probe_data['step_id']} - {probe_data['step_name']}", style={'fontWeight': 'bold', 'fontSize': '16px', 'color': COLORS['accent']})
+        ], style={'marginBottom': '10px'}),
+        
+        html.Div([
+            html.Span("DESCRIPTION : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}),
+            html.P(probe_data['description'], style={'fontSize': '14px', 'margin': '5px 0'})
+        ], style={'marginBottom': '15px'}),
+        
+        html.Div(style={'backgroundColor': 'white', 'padding': '10px', 'borderRadius': '5px', 'borderLeft': f'5px solid {status_color}'}, children=[
+            html.Div([
+                html.Span("STATUT : ", style={'fontWeight': 'bold', 'fontSize': '12px'}),
+                html.Span(status_icon, style={'fontWeight': 'bold', 'color': status_color, 'fontSize': '14px'})
+            ])
+        ])
+    ]
+
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, f"Sonde {s_val}/{max_s}", doc_text, anim_disabled, btn_text
+
+if __name__ == '__main__':
+    app.run(debug=True)
