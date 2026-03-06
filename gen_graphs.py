@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import networkx as nx
 import math
 import ast
+import re
 
 # --- STYLES & CONFIGURATION ---
 COLORS = {
@@ -131,6 +132,129 @@ def _build_probe_step_annotations(path, pos, color):
         )
 
     return annotations
+
+def _normalize_edge(u, v):
+    return tuple(sorted((u, v), key=str))
+
+def _get_highlighted_edge(probe, topo):
+    path = probe['path']
+    step_id = probe['step_id']
+    description = probe['description']
+
+    if topo == 'complet':
+        if step_id == 'STAR' and len(path) >= 2:
+            return _normalize_edge(path[0], path[1])
+        if step_id == 'CYCLE' and len(path) >= 3:
+            return _normalize_edge(path[1], path[2])
+
+    if topo == 'arbre':
+        outward_len = (len(path) + 1) // 2
+        if outward_len >= 2:
+            return _normalize_edge(path[outward_len - 2], path[outward_len - 1])
+
+    if topo == 'grille':
+        match = re.search(r'arête\s+(\([^)]+\))-(\([^)]+\))', description)
+        if match:
+            try:
+                return _normalize_edge(ast.literal_eval(match.group(1)), ast.literal_eval(match.group(2)))
+            except:
+                return None
+
+    return None
+
+def _get_highlighted_edges(probe, topo):
+    path = probe['path']
+    step_id = probe['step_id']
+    description = probe['description']
+    highlighted_edges = []
+
+    def add_edge(u, v):
+        edge = _normalize_edge(u, v)
+        if edge not in highlighted_edges:
+            highlighted_edges.append(edge)
+
+    if topo == 'complet':
+        if step_id == 'STAR' and len(path) >= 2:
+            add_edge(path[0], path[1])
+        if step_id == 'CYCLE' and len(path) >= 3:
+            add_edge(path[1], path[2])
+        return highlighted_edges
+
+    if topo == 'arbre':
+        outward_len = (len(path) + 1) // 2
+        for i in range(max(0, outward_len - 1)):
+            add_edge(path[i], path[i + 1])
+        return highlighted_edges
+
+    if topo == 'lineaire':
+        outward_len = (len(path) + 1) // 2
+        for i in range(max(0, outward_len - 1)):
+            add_edge(path[i], path[i + 1])
+        return highlighted_edges
+
+    if topo == 'grille':
+        if step_id == '1a':
+            for i in range(len(path) - 1):
+                u, v = path[i], path[i + 1]
+                if u[1] == 0 and v[1] == 0 and u[0] != v[0]:
+                    add_edge(u, v)
+            return highlighted_edges
+
+        if step_id == '2a':
+            for i in range(len(path) - 1):
+                u, v = path[i], path[i + 1]
+                if u[0] == 0 and v[0] == 0 and u[1] != v[1]:
+                    add_edge(u, v)
+            return highlighted_edges
+
+        if step_id == '3a':
+            match = re.search(r'(\d+)', description)
+            if match:
+                target_row = int(match.group(1))
+                for i in range(len(path) - 1):
+                    u, v = path[i], path[i + 1]
+                    if u[0] == target_row and v[0] == target_row and u[1] != v[1]:
+                        add_edge(u, v)
+            return highlighted_edges
+
+        if step_id == '4a':
+            match = re.search(r'(\d+)', description)
+            if match:
+                target_col = int(match.group(1))
+                for i in range(len(path) - 1):
+                    u, v = path[i], path[i + 1]
+                    if u[1] == target_col and v[1] == target_col and u[0] != v[0]:
+                        add_edge(u, v)
+            return highlighted_edges
+
+        if step_id in ['1b', '2b']:
+            match = re.search(r'(\([^)]+\))-(\([^)]+\))', description)
+            if match:
+                try:
+                    add_edge(ast.literal_eval(match.group(1)), ast.literal_eval(match.group(2)))
+                except:
+                    return highlighted_edges
+            return highlighted_edges
+
+        if step_id == '3b':
+            match = re.search(r'(\d+)', description)
+            target_col = int(match.group(1)) if match else None
+            for i in range(len(path) - 1):
+                u, v = path[i], path[i + 1]
+                if target_col is not None and u[0] == v[0] and sorted([u[1], v[1]]) == [target_col - 1, target_col]:
+                    add_edge(u, v)
+            return highlighted_edges
+
+        if step_id == '4b':
+            match = re.search(r'(\d+)', description)
+            target_row = int(match.group(1)) if match else None
+            for i in range(len(path) - 1):
+                u, v = path[i], path[i + 1]
+                if target_row is not None and u[1] == v[1] and sorted([u[0], v[0]]) == [target_row - 1, target_row]:
+                    add_edge(u, v)
+            return highlighted_edges
+
+    return highlighted_edges
 
 
 class NetworkEngine:
@@ -501,11 +625,29 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     is_failed = current_res['failed']
     path = probe_data['path']
     col = COLORS['fail'] if is_failed else COLORS['success']
+    highlighted_edges = _get_highlighted_edges(probe_data, st_t['type'])
     
     px, py = [], []
     for node in path:
         px.append(pos[node][0])
         py.append(pos[node][1])
+
+    for highlighted_edge in highlighted_edges:
+        try:
+            hu, hv = highlighted_edge
+            hx0, hy0 = pos[hu]
+            hx1, hy1 = pos[hv]
+            fig.add_trace(go.Scatter(
+                x=[hx0, hx1],
+                y=[hy0, hy1],
+                mode='lines',
+                line=dict(width=7, color='#E74C3C'),
+                opacity=0.95,
+                hoverinfo='skip',
+                showlegend=False
+            ))
+        except:
+            pass
     
     fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=col), opacity=0.9, name='Sonde'))
     
