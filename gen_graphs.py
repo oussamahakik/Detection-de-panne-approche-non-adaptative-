@@ -49,6 +49,90 @@ ALGO_DOCS = {
 }
 
 # --- MOTEUR ALGORITHMIQUE UNIFIÉ ---
+def _distance_sq(p1, p2):
+    dx = p1[0] - p2[0]
+    dy = p1[1] - p2[1]
+    return dx * dx + dy * dy
+
+def _build_probe_step_annotations(path, pos, color):
+    """
+    Génère les annotations chiffrées pour chaque étape de la sonde.
+    Intègre une détection de collision et s'adapte à l'échelle du graphe.
+    """
+    if len(path) < 2:
+        return []
+
+    occupied = [(pos[n][0], pos[n][1]) for n in pos]
+    placed = []
+    annotations = []
+
+    # 1. Calcul de l'échelle moyenne pour adapter l'offset
+    edge_lengths = []
+    for i in range(len(path) - 1):
+        u, v = path[i], path[i+1]
+        dx = pos[v][0] - pos[u][0]
+        dy = pos[v][1] - pos[u][1]
+        edge_lengths.append(math.sqrt(dx*dx + dy*dy))
+        
+    avg_len = sum(edge_lengths) / len(edge_lengths) if edge_lengths else 1.0
+    base_offset = avg_len * 0.18
+    min_dist_sq = (base_offset * 0.85) ** 2
+
+    for idx in range(len(path) - 1):
+        u, v = path[idx], path[idx + 1]
+        x0, y0 = pos[u]
+        x1, y1 = pos[v]
+        
+        mx = (x0 + x1) / 2.0
+        my = (y0 + y1) / 2.0
+
+        dx = x1 - x0
+        dy = y1 - y0
+        norm = math.sqrt(dx * dx + dy * dy)
+        
+        if norm == 0:
+            nxn, nyn = 0.0, 1.0
+        else:
+            nxn, nyn = -dy / norm, dx / norm
+
+        chosen = None
+        multipliers = [1.2, -1.2, 2.2, -2.2, 3.5, -3.5]
+        
+        for mult in multipliers:
+            cx = mx + nxn * base_offset * mult
+            cy = my + nyn * base_offset * mult
+            
+            if all(_distance_sq((cx, cy), p) >= min_dist_sq for p in occupied + placed):
+                chosen = (cx, cy)
+                break
+                
+        if chosen is None:
+            chosen = (mx + nxn * base_offset * 4.5, my + nyn * base_offset * 4.5)
+
+        placed.append(chosen)
+        annotations.append(
+            dict(
+                x=chosen[0],
+                y=chosen[1],
+                xref="x",
+                yref="y",
+                text=f"<b>{idx + 1}</b>",
+                showarrow=False,
+                font=dict(size=11, color=color, family="Arial, sans-serif"),
+                bgcolor="rgba(255, 255, 255, 0.85)",
+                bordercolor=color,
+                borderwidth=1.5,
+                borderpad=3,
+                opacity=1.0,
+                xanchor="center",
+                yanchor="middle",
+                captureevents=False
+            )
+        )
+
+    return annotations
+
+
 class NetworkEngine:
     def __init__(self, n, topo):
         self.n = n
@@ -101,16 +185,15 @@ class NetworkEngine:
         
         # Création des sondes
         for idx, (start, end) in enumerate(windows):
-            path_aller = self._get_path(0, start)
-            segment_window = list(range(start + 1, end + 1))
-            path_retour = self._get_path(end, 0)
-            
-            full_path = ([0] + segment_window + path_retour[1:]) if start == 0 else (path_aller + segment_window + path_retour[1:])
+            # AJOUT ICI : Création d'un aller-retour sur la fenêtre glissante
+            path_aller = list(range(start, end + 1))
+            path_retour = path_aller[-2::-1] if len(path_aller) > 1 else []
+            full_path = path_aller + path_retour
             
             self._add_probe(full_path, 
                             f"WIN-{idx+1}", 
                             "Fenêtre Glissante", 
-                            f"Test du segment couvrant les nœuds {start} à {end}.")
+                            f"Test direct du segment couvrant les nœuds {start} à {end} (Aller-Retour).")
 
     def _generate_complete_algo(self):
         # 1. Phase Hub (Star)
@@ -129,14 +212,11 @@ class NetworkEngine:
                                 f"Test du lien distant {u}-{v} via le cycle 0->{u}->{v}->0.")
 
     def _generate_tree_algo(self):
-        # Dans un arbre, on teste le chemin de la racine vers chaque nœud
-        # Pour une meilleure visualisation, on peut trier par distance à la racine
         nodes_by_depth = sorted(self.G.nodes(), key=lambda x: len(self._get_path(0, x)))
         
         for i in nodes_by_depth:
             if i == 0: continue
             path = self._get_path(0, i)
-            # Aller-Retour
             full_path = path + path[-2::-1]
             
             self._add_probe(full_path, 
@@ -319,7 +399,6 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     
     # Init Topologie
     if ctx_id == 'btn-build' or not st_t:
-        # Ajustement taille pour Grille (Carré parfait)
         if topo == 'grille':
             s = int(math.sqrt(n_nodes))
             n_final = s * s
@@ -344,7 +423,6 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     if ctx_id == 'graph' and click:
         try:
             p = click['points'][0]['customdata']
-            # Adaptation format tuple pour Grille vs Int pour autres
             if st_t['type'] == 'grille':
                 st_f = sorted([tuple(p[0]), tuple(p[1])], key=str)
             else:
@@ -374,7 +452,6 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     elif ctx_id == 'anim-interval':
         if s_val < max_s:
             s_val += 1
-            # Arrêt sur erreur
             if results[s_val - 1]['failed']:
                 anim_disabled = True
                 btn_text = "▶️ Reprendre"
@@ -393,7 +470,6 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
         btn_text = "⏸️ Stop"
 
     # --- VISUALISATION ---
-    # Layout
     pos = {}
     if st_t['type'] == 'lineaire':
         for node in eng.G.nodes(): pos[node] = (node, 0)
@@ -433,11 +509,16 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     
     fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=col), opacity=0.9, name='Sonde'))
     
+    # Annotations uniquement pour grille et linéaire
+    if st_t['type'] in ['grille', 'lineaire']:
+        step_annotations = _build_probe_step_annotations(path, pos, col)
+    else:
+        step_annotations = []
+    
     # Flèches
     if len(path) > 1:
         mid = len(path) // 2
         fig.add_trace(go.Scatter(x=[px[0]], y=[py[0]], mode='markers', marker=dict(size=12, color=col, symbol='circle')))
-        # Petit indicateur de direction au milieu
         fig.add_trace(go.Scatter(x=[px[mid]], y=[py[mid]], mode='markers', marker=dict(size=10, color=col, symbol='triangle-up'), showlegend=False))
 
     # Nœuds
@@ -448,12 +529,14 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, topo, n
     y_range = [-0.5, 0.5] if st_t['type'] == 'lineaire' else None
     ratio = 1 if st_t['type'] == 'grille' else None
 
+    # Injection des annotations
     fig.update_layout(
         margin=dict(l=20,r=20,t=20,b=20), 
         xaxis={'visible':False, 'fixedrange': True}, 
         yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':ratio, 'range': y_range, 'fixedrange': True}, 
         plot_bgcolor=COLORS['bg'],
-        showlegend=False
+        showlegend=False,
+        annotations=step_annotations
     )
 
     # --- NARRATIF ---
