@@ -24,29 +24,29 @@ ALGO_DOCS = {
         #### Algorithme 2 : Grille Hiérarchique
         **Stratégie :** Division par Axes et Groupes.
         * **Mode Naïf :** Test unitaire de chaque barreau de l'échelle.
-        * **Mode LTP (Article) :** Tests de groupe (Combinatorial Group Testing) sur les arêtes d'une même ligne/colonne pour une complexité logarithmique.
+        * **Mode LTP (Article) :** Tests de groupe sur les arêtes d'une même ligne/colonne pour une complexité O(log n).
     '''),
     'lineaire': dcc.Markdown(r'''
         #### Algorithme 1 : Fenêtre Glissante
         **Stratégie :** Recouvrement Progressif.
-        La borne théorique est linéaire (W ≈ N/2). Le mode LTP et Naïf sont ici similaires par nature géométrique de la ligne.
+        La borne théorique est linéaire (W ≈ N/2). Le mode LTP et Naïf sont ici similaires.
     ''', mathjax=True),
     'complet': dcc.Markdown(r'''
         #### Algorithme 3 : Hub & Spoke
         **Stratégie :** Centre vers Périphérie.
         1. **Phase Étoile :** Validation des liens du Hub.
         2. **Phase Cycle :** Validation des liens distants.
-        * **Mode LTP :** Divise massivement le nombre de sondes en testant des combinaisons binaires d'arêtes simultanément.
+        * **Mode LTP :** Divise massivement le nombre de sondes via la matrice binaire (affichée à gauche).
     ''', mathjax=True),
     'arbre': dcc.Markdown(r'''
         #### Algorithme 4 : Profondeur
         **Stratégie :** Racine vers Feuilles.
-        * **Mode Naïf :** Une sonde par branche (force brute).
-        * **Mode LTP :** Regroupement des branches par profondeur pour un diagnostic logarithmique accéléré.
+        * **Mode Naïf :** Une sonde par branche.
+        * **Mode LTP :** Regroupement des branches par profondeur via la procédure logarithmique.
     ''', mathjax=True)
 }
 
-# --- MOTEUR ALGORITHMIQUE UNIFIÉ ---
+# --- OUTILS GRAPHIQUES ET MATRICE ---
 def _distance_sq(p1, p2):
     return (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2
 
@@ -77,14 +77,104 @@ def _build_probe_step_annotations(path, pos, color):
         annotations.append(dict(x=chosen[0], y=chosen[1], xref="x", yref="y", text=f"<b>{idx + 1}</b>", showarrow=False, font=dict(size=11, color=color), bgcolor="rgba(255, 255, 255, 0.85)", bordercolor=color, borderwidth=1.5, opacity=1.0))
     return annotations
 
-def _normalize_edge(u, v):
-    return tuple(sorted((u, v), key=str))
+def _build_matrix_html(ltp_meta):
+    """Génère le rendu HTML de la matrice de test binaire."""
+    if not ltp_meta:
+        return html.Div([
+            html.P("Mode Naïf ou test global.", style={'color': '#7F8C8D', 'fontStyle': 'italic', 'fontSize': '12px', 'margin': 0}),
+            html.P("Passez en Mode LTP pour voir la matrice de Combinatorial Group Testing.", style={'color': '#7F8C8D', 'fontSize': '11px'})
+        ])
+    
+    items = ltp_meta['items']
+    matrix = ltp_meta['matrix']
+    active_idx = ltp_meta['active_test']
+    phase_name = ltp_meta['phase']
+
+    # Entêtes du tableau (noms des items testés)
+    headers = [html.Th("Sonde", style={'padding': '5px', 'borderBottom': '1px solid #ddd', 'backgroundColor': '#f8f9fa', 'position': 'sticky', 'left': 0, 'zIndex': 2})]
+    for item in items:
+        # Rotation du texte pour gagner de la place horizontalement
+        headers.append(html.Th(str(item), style={'padding': '5px', 'borderBottom': '1px solid #ddd', 'fontSize': '10px', 'writingMode': 'vertical-rl', 'transform': 'rotate(180deg)', 'height': '70px', 'textAlign': 'center'}))
+    
+    rows = []
+    for r_idx, row_data in enumerate(matrix):
+        is_active = (r_idx == active_idx)
+        row_style = {'backgroundColor': 'rgba(41, 128, 185, 0.15)' if is_active else 'transparent', 'fontWeight': 'bold' if is_active else 'normal'}
+        
+        # Colonne de gauche (T1, T2...)
+        tds = [html.Td(f"T{r_idx + 1} (bit {r_idx})", style={'padding': '5px', 'borderBottom': '1px solid #eee', 'position': 'sticky', 'left': 0, 'backgroundColor': '#f8f9fa' if not is_active else 'rgba(41, 128, 185, 0.15)', 'zIndex': 1, 'fontSize': '11px'})]
+        
+        for val in row_data:
+            bg = COLORS['accent'] if val == 1 else '#ecf0f1'
+            col = 'white' if val == 1 else '#bdc3c7'
+            opacity = '1.0' if is_active else '0.5'
+            tds.append(html.Td(str(val), style={'padding': '2px', 'textAlign': 'center', 'borderBottom': '1px solid #eee'}))
+            # Ajout d'une div interne pour le style du carré
+            tds[-1].children = html.Div(str(val), style={'backgroundColor': bg, 'color': col, 'borderRadius': '3px', 'width': '16px', 'height': '16px', 'lineHeight': '16px', 'margin': 'auto', 'opacity': opacity})
+            
+        rows.append(html.Tr(tds, style=row_style))
+
+    return html.Div([
+        html.H4(f"Matrice LTP : {phase_name}", style={'marginTop': '0', 'marginBottom': '5px', 'fontSize': '13px', 'color': COLORS['text'], 'textTransform': 'uppercase'}),
+        html.Div(
+            html.Table(
+                [html.Thead(html.Tr(headers))] + [html.Tbody(rows)],
+                style={'borderCollapse': 'collapse', 'width': '100%', 'fontSize': '12px', 'minWidth': 'max-content'}
+            ),
+            style={'overflowX': 'auto', 'maxHeight': '200px', 'overflowY': 'auto', 'border': '1px solid #ddd', 'borderRadius': '5px', 'backgroundColor': 'white'}
+        )
+    ])
+
+def _build_math_details_html(ltp_meta, topo_type):
+    """Génère le panneau d'explications mathématiques basé sur l'étape courante."""
+    if not ltp_meta:
+        return html.Div()
+
+    m = len(ltp_meta['items'])
+    if m == 0:
+        return html.Div()
+
+    phase_name = ltp_meta['phase']
+    
+    # Explication spécifique pour le calcul de m
+    m_explanation = ""
+    if topo_type == 'complet':
+        if "Hub" in phase_name:
+            m_explanation = f"Éléments testés : les $N-1$ liens directs vers le Hub."
+        elif "Cycle" in phase_name:
+             # Retrouver N à partir de m. m = (N-1)(N-2)/2. On a m arêtes distantes pour N-1 nœuds périphériques.
+             # Si on a N nœuds, il y a N-1 nœuds périphériques.
+             # N_periph = N - 1. Combinaisons = N_periph * (N_periph - 1) / 2
+             # Pour simplifier l'affichage, on se base directement sur m et on explique la formule.
+             m_explanation = f"Éléments testés : les combinaisons entre les nœuds périphériques. $m = \\frac{{K \\times (K-1)}}{{2}}$ (où $K$ est le nb de nœuds périphériques)."
+    
+    # Calcul du nombre de tests (T)
+    T = math.ceil(math.log2(m + 1))
+    
+    return html.Div([
+        html.H4("Détails Mathématiques (CGT)", style={'marginTop': '15px', 'marginBottom': '10px', 'fontSize': '14px', 'color': COLORS['accent'], 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
+        
+        # Affichage de m
+        html.Div([
+            html.Strong("Taille du problème ($m$) : ", style={'fontSize': '12px'}),
+            html.Span(f"{m} éléments", style={'fontSize': '12px'}),
+            dcc.Markdown(m_explanation, mathjax=True, style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '8px'})
+        ]),
+        
+        # Affichage du calcul de T
+        html.Div([
+            html.Strong("Nombre de sondes ($T$) : ", style={'fontSize': '12px'}),
+            dcc.Markdown(f"$T = \\lceil \\log_2(m + 1) \\rceil = \\lceil \\log_2({m} + 1) \\rceil = {T}$ sondes.", mathjax=True, style={'fontSize': '12px', 'display': 'inline-block', 'marginLeft': '5px'}),
+            html.P(f"L'algorithme a généré une matrice de {T} lignes pour identifier 1 défaillance parmi {m} éléments.", style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '0'})
+        ])
+    ], style={'backgroundColor': '#fdfdfe', 'padding': '10px', 'borderRadius': '5px', 'border': '1px solid #e0e0e0', 'marginTop': '15px'})
+
 
 class NetworkEngine:
     def __init__(self, n, topo, mode='naif'):
         self.n = n
         self.type = topo
-        self.mode = mode # 'naif' ou 'ltp'
+        self.mode = mode 
         self.G = self._build_graph()
         self.probes = []
         
@@ -106,29 +196,34 @@ class NetworkEngine:
         try: return nx.shortest_path(self.G, u, v)
         except: return []
 
-    def _add_probe(self, path, step_id, step_name, description):
+    def _add_probe(self, path, step_id, step_name, description, ltp_meta=None):
         self.probes.append({
             'path': path, 'step_id': step_id, 'step_name': step_name, 
-            'description': description, 'id': len(self.probes) + 1
+            'description': description, 'id': len(self.probes) + 1,
+            'ltp_meta': ltp_meta # NOUVEAU: Stockage de la matrice pour cette sonde
         })
 
-    # --- NOUVEAU : MOTEUR LOGARITHMIQUE (LTP) ---
     def _get_ltp_subsets(self, items):
-        """Génère la matrice de tests combinatoires binaires."""
+        """Génère la matrice de tests combinatoires binaires complète."""
         m = len(items)
-        if m == 0: return []
+        if m == 0: return {'subsets': [], 'items': [], 'num_tests': 0, 'matrix': []}
         num_tests = math.ceil(math.log2(m + 1))
         tests = [[] for _ in range(num_tests)]
-        for i, item in enumerate(items):
-            val = i + 1 # 0 est réservé au cas "aucune erreur"
-            for t in range(num_tests):
-                if (val >> t) & 1:
+        matrix = [] # Construction de la représentation visuelle
+        
+        for t in range(num_tests):
+            row_bits = []
+            for i, item in enumerate(items):
+                val = i + 1 # 0 est réservé au cas "aucune erreur"
+                bit = (val >> t) & 1
+                row_bits.append(bit)
+                if bit:
                     tests[t].append(item)
-        return tests
+            matrix.append(row_bits)
+            
+        return {'subsets': tests, 'items': items, 'num_tests': num_tests, 'matrix': matrix}
 
-    # --- GENERATEURS DE SONDES ---
     def _generate_linear_algo(self):
-        # Pour le linéaire, la borne est Theta(n), le LTP n'apporte pas de gain logarithmique direct
         w = math.ceil(self.n / 2)
         windows = []
         for start in range(self.n):
@@ -147,30 +242,29 @@ class NetworkEngine:
 
     def _generate_complete_algo(self):
         if self.mode == 'naif':
-            # Phase Hub
             for i in range(1, self.n):
                 self._add_probe([0, i, 0], "STAR", "Validation Hub", f"Test unitaire Hub 0 - Nœud {i}.")
-            # Phase Cycles
             for u in range(1, self.n):
                 for v in range(u+1, self.n):
                     self._add_probe([0, u, v, 0], "CYCLE", "Triangulation", f"Test unitaire arête {u}-{v}.")
         else:
-            # MODE LTP : Réduction drastique des sondes
             hub_nodes = list(range(1, self.n))
             ltp_hub = self._get_ltp_subsets(hub_nodes)
-            for idx, subset in enumerate(ltp_hub):
+            for idx, subset in enumerate(ltp_hub['subsets']):
                 if not subset: continue
                 path = [0]
                 for node in subset: path.extend([node, 0])
-                self._add_probe(path, f"STAR-LTP-{idx+1}", "LTP Hub", f"Test combiné (bit {idx}) sur les nœuds {subset}.")
+                meta = {'matrix': ltp_hub['matrix'], 'items': ltp_hub['items'], 'active_test': idx, 'phase': 'Hub (Nœuds)'}
+                self._add_probe(path, f"STAR-LTP-{idx+1}", "LTP Hub", f"Test combinatoire sur les nœuds {subset}.", ltp_meta=meta)
                 
             other_edges = [(u, v) for u in range(1, self.n) for v in range(u+1, self.n)]
             ltp_cycles = self._get_ltp_subsets(other_edges)
-            for idx, subset in enumerate(ltp_cycles):
+            for idx, subset in enumerate(ltp_cycles['subsets']):
                 if not subset: continue
                 path = [0]
                 for u, v in subset: path.extend([u, v, 0])
-                self._add_probe(path, f"CYCLE-LTP-{idx+1}", "LTP Distant", f"Test combiné (bit {idx}) sur {len(subset)} arêtes distantes.")
+                meta = {'matrix': ltp_cycles['matrix'], 'items': ltp_cycles['items'], 'active_test': idx, 'phase': 'Cycles (Arêtes)'}
+                self._add_probe(path, f"CYCLE-LTP-{idx+1}", "LTP Distant", f"Test combinatoire sur {len(subset)} arêtes distantes.", ltp_meta=meta)
 
     def _generate_tree_algo(self):
         nodes_by_depth = sorted(self.G.nodes(), key=lambda x: len(self._get_path(0, x)))
@@ -180,7 +274,6 @@ class NetworkEngine:
                 path = self._get_path(0, i)
                 self._add_probe(path + path[-2::-1], "BRANCH", "Sondage Unitaire", f"Validation branche vers {i}.")
         else:
-            # Mode LTP : Groupement par profondeur (simplifié pour visualisation)
             depth_groups = {}
             for n in nodes_by_depth:
                 if n == 0: continue
@@ -189,38 +282,37 @@ class NetworkEngine:
                 depth_groups[d].append(n)
                 
             for d, nodes in depth_groups.items():
-                ltp_tests = self._get_ltp_subsets(nodes)
-                for idx, subset in enumerate(ltp_tests):
+                ltp_data = self._get_ltp_subsets(nodes)
+                for idx, subset in enumerate(ltp_data['subsets']):
                     if not subset: continue
                     path = [0]
                     for node in subset:
                         p = self._get_path(0, node)
                         path.extend(p[1:] + p[-2::-1])
-                    self._add_probe(path, f"DEPTH-LTP-{d}-{idx}", f"LTP Profondeur {d}", f"Test combiné sur les nœuds {subset}.")
+                    meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': f'Profondeur {d}'}
+                    self._add_probe(path, f"DEPTH-LTP-{d}-{idx}", f"LTP Profondeur {d}", f"Test combinatoire sur les nœuds {subset}.", ltp_meta=meta)
 
     def _generate_grid_algo(self):
         s = int(math.sqrt(self.n))
         origin = (0,0)
 
-        # 1a. Col 0 Globale
         path = [(r, 0) for r in range(s)] + [(r, 0) for r in range(s-2, -1, -1)]
         self._add_probe(path, "1a", "Axe Vertical", "Test global de la Colonne 0.")
 
         if self.mode == 'naif':
-            # 1b. Col 0 Unitaire
             for r in range(s-1):
                 p = self._get_path(origin, (r,0)) + [(r,1), (r+1,1)] + self._get_path((r+1,0), origin)
                 self._add_probe(p, "1b", "Détail Col 0", f"Test unitaire arête ({r},0)-({r+1},0).")
         else:
-            # 1b. Col 0 LTP (Via Col 1)
             edges_c0 = [(r, 0) for r in range(s-1)]
-            for idx, subset in enumerate(self._get_ltp_subsets(edges_c0)):
+            ltp_data = self._get_ltp_subsets(edges_c0)
+            for idx, subset in enumerate(ltp_data['subsets']):
                 if not subset: continue
                 p = [origin]
                 for r, _ in subset: p.extend([(r,0), (r,1), (r+1,1), (r+1,0), origin])
-                self._add_probe(p, f"1b-LTP-{idx+1}", "LTP Col 0", f"Test combinatoire sur {len(subset)} arêtes de Col 0.")
+                meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Colonne 0'}
+                self._add_probe(p, f"1b-LTP-{idx+1}", "LTP Col 0", f"Test combinatoire sur {len(subset)} arêtes de Col 0.", ltp_meta=meta)
 
-        # 2a. Row 0 Globale
         path = [(0, c) for c in range(s)] + [(0, c) for c in range(s-2, -1, -1)]
         self._add_probe(path, "2a", "Axe Horizontal", "Test global de la Ligne 0.")
 
@@ -229,20 +321,19 @@ class NetworkEngine:
                 p = self._get_path(origin, (0,c)) + [(1,c), (1,c+1)] + self._get_path((0,c+1), origin)
                 self._add_probe(p, "2b", "Détail Row 0", f"Test unitaire arête (0,{c})-(0,{c+1}).")
         else:
-            # 2b. Row 0 LTP (Via Row 1)
             edges_r0 = [(0, c) for c in range(s-1)]
-            for idx, subset in enumerate(self._get_ltp_subsets(edges_r0)):
+            ltp_data = self._get_ltp_subsets(edges_r0)
+            for idx, subset in enumerate(ltp_data['subsets']):
                 if not subset: continue
                 p = [origin]
                 for _, c in subset: p.extend([(0,c), (1,c), (1,c+1), (0,c+1), origin])
-                self._add_probe(p, f"2b-LTP-{idx+1}", "LTP Ligne 0", f"Test combinatoire sur {len(subset)} arêtes de Ligne 0.")
+                meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Ligne 0'}
+                self._add_probe(p, f"2b-LTP-{idx+1}", "LTP Ligne 0", f"Test combinatoire sur {len(subset)} arêtes de Ligne 0.", ltp_meta=meta)
 
-        # (Nous simplifions les étapes 3 et 4 pour la lisibilité visuelle du code dans les deux modes)
         for r in range(1, s):
             p = self._get_path(origin, (r,0)) + [(r, c) for c in range(1, s)] + [(r, c) for c in range(s-2, -1, -1)] + self._get_path((r,0), origin)[1:]
             self._add_probe(p, "3a", "Ligne Complète", f"Test global Ligne {r}.")
 
-    # --- EXECUTION ---
     def run_simulation(self, fault):
         fsig = str(tuple(sorted(fault, key=str))) if fault else ""
         results = []
@@ -265,7 +356,7 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
     ]),
 
     html.Div(className='row', style={'display': 'flex', 'gap': '20px'}, children=[
-        html.Div(style={'flex': '1', 'maxWidth': '400px'}, children=[
+        html.Div(style={'flex': '1', 'maxWidth': '450px'}, children=[
             
             html.Div(style={'backgroundColor': COLORS['card'], 'padding': '20px', 'borderRadius': '10px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)', 'marginBottom': '20px'}, children=[
                 html.H3("1. Configuration", style={'marginTop': 0, 'color': COLORS['accent'], 'fontSize': '18px'}),
@@ -276,17 +367,16 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                     {'label': 'Linéaire (Fenêtre Glissante)', 'value': 'lineaire'},
                     {'label': 'Complet (Hub & Cycles)', 'value': 'complet'},
                     {'label': 'Arbre (Profondeur)', 'value': 'arbre'}
-                ], value='grille', clearable=False),
+                ], value='complet', clearable=False),
 
-                # NOUVEAU BOUTON RADIO POUR LE MODE
                 html.Label("Mode d'Algorithme :", style={'marginTop': '15px', 'display': 'block', 'fontWeight': 'bold'}),
                 dcc.RadioItems(id='algo-mode', options=[
                     {'label': ' Naïf (Boucle itérative)', 'value': 'naif'},
                     {'label': ' LTP (Article - O(log N))', 'value': 'ltp'}
-                ], value='naif', labelStyle={'display': 'block', 'margin': '5px 0'}),
+                ], value='ltp', labelStyle={'display': 'block', 'margin': '5px 0'}),
 
                 html.Label("Taille du réseau (Nœuds) :", style={'marginTop': '15px', 'display': 'block'}),
-                dcc.Slider(id='n-slider', min=5, max=25, step=1, value=16, marks={5:'5', 10:'10', 16:'16', 25:'25'}),
+                dcc.Slider(id='n-slider', min=5, max=25, step=1, value=10, marks={5:'5', 10:'10', 16:'16', 25:'25'}),
                 
                 html.Button("Générer Réseau", id='btn-build', style={'width': '100%', 'marginTop': '15px', 'backgroundColor': COLORS['accent'], 'color': 'white', 'border': 'none', 'padding': '10px', 'borderRadius': '5px', 'cursor': 'pointer'}),
                 html.Hr(),
@@ -296,7 +386,11 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
 
             html.Div(style={'backgroundColor': COLORS['step_box'], 'padding': '20px', 'borderRadius': '10px', 'border': f'2px solid {COLORS["accent"]}'}, children=[
                 html.H3("Status de l'Algorithme", style={'marginTop': 0, 'color': COLORS['text'], 'fontSize': '18px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '10px'}),
-                html.Div(id='step-display', children=[html.P("En attente de simulation...", style={'color': '#7F8C8D'})])
+                html.Div(id='step-display', children=[html.P("En attente de simulation...", style={'color': '#7F8C8D'})]),
+                
+                html.Div(id='matrix-display', style={'marginTop': '15px'}),
+                # NOUVEAU CONTENEUR POUR LES DETAILS MATHS
+                html.Div(id='math-details-display')
             ]),
             
             html.Div(id='algo-doc', style={'marginTop': '20px', 'fontSize': '13px', 'color': '#555'})
@@ -331,6 +425,8 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('sim-slider', 'max'), 
      Output('sim-slider', 'value'), 
      Output('step-display', 'children'),
+     Output('matrix-display', 'children'),
+     Output('math-details-display', 'children'), # <-- NOUVELLE SORTIE MATHS
      Output('counter-display', 'children'),
      Output('algo-doc', 'children'),
      Output('anim-interval', 'disabled'), 
@@ -341,7 +437,7 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Input('sim-slider', 'value'), 
      Input('btn-play', 'n_clicks'), 
      Input('anim-interval', 'n_intervals'),
-     Input('algo-mode', 'value')], # Trigger quand on change le mode !
+     Input('algo-mode', 'value')],
     [State('topo', 'value'), 
      State('n-slider', 'value'), 
      State('st-topo', 'data'), 
@@ -352,6 +448,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
     fig = go.Figure()
     anim_disabled = True
     btn_text = "▶️ Lecture"
+    matrix_html = html.Div()
+    math_details_html = html.Div()
     
     if ctx_id in ['btn-build', 'algo-mode', None] or not st_t:
         n_final = int(math.sqrt(n_nodes))**2 if topo == 'grille' else n_nodes
@@ -360,8 +458,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
     
     if st_f and isinstance(st_f[0], list): st_f = sorted((tuple(st_f[0]), tuple(st_f[1])), key=str)
 
-    # Création du moteur avec le MODE sélectionné
-    eng = NetworkEngine(st_t['n'], st_t['type'], mode=st_t.get('mode', 'naif'))
+    eng = NetworkEngine(st_t['n'], st_t['type'], mode=st_t.get('mode', 'ltp'))
     opts = [{'label': f"Lien {u} - {v}", 'value': str(sorted((u, v), key=str))} for u,v in eng.G.edges()]
     
     if ctx_id == 'graph' and click:
@@ -440,6 +537,9 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
             html.Div([html.Span("DESCRIPTION : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.P(probe['description'], style={'fontSize': '14px', 'margin': '5px 0'})]),
             html.Div(style={'backgroundColor': 'white', 'padding': '10px', 'borderLeft': f'5px solid {status_col}'}, children=[html.Span("STATUT : ", style={'fontWeight': 'bold', 'fontSize': '12px'}), html.Span("❌ ÉCHEC" if is_failed else "✅ SUCCÈS", style={'fontWeight': 'bold', 'color': status_col})])
         ]
+        
+        matrix_html = _build_matrix_html(probe.get('ltp_meta'))
+        math_details_html = _build_math_details_html(probe.get('ltp_meta'), st_t['type']) # Appel pour générer les détails
     else:
         step_content = [html.P("Aucune sonde générée.", style={'color': '#7F8C8D'})]
 
@@ -451,7 +551,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
         plot_bgcolor=COLORS['bg'], showlegend=False
     )
 
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
 
 if __name__ == '__main__':
     app.run(debug=True)
