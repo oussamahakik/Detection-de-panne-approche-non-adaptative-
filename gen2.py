@@ -4,7 +4,6 @@ import plotly.graph_objects as go
 import networkx as nx
 import math
 import ast
-import re
 
 # --- STYLES & CONFIGURATION ---
 COLORS = {
@@ -17,6 +16,20 @@ COLORS = {
     'edge_inactive': '#BDC3C7',
     'step_box': '#ECF0F1'
 }
+
+# --- PALETTE DE COULEURS POUR LES SONDES ---
+PROBE_COLORS = [
+    '#2980B9', # Bleu (T1)
+    '#8E44AD', # Violet (T2)
+    '#D35400', # Orange (T3)
+    '#16A085', # Vert canard (T4)
+    '#C0392B', # Rouge sombre (T5)
+    '#F39C12', # Jaune (T6)
+    '#34495E', # Bleu nuit (T7)
+    '#27AE60', # Vert émeraude (T8)
+    '#E74C3C', # Alizarin (T9)
+    '#9B59B6'  # Améthyste (T10)
+]
 
 # --- DOCUMENTATION ---
 ALGO_DOCS = {
@@ -36,7 +49,7 @@ ALGO_DOCS = {
         **Stratégie :** Centre vers Périphérie.
         1. **Phase Étoile :** Validation des liens du Hub.
         2. **Phase Cycle :** Validation des liens distants.
-        * **Mode LTP :** Divise massivement le nombre de sondes via la matrice binaire (affichée à gauche).
+        * **Mode LTP :** Divise massivement le nombre de sondes via la matrice binaire. Calcule un circuit Eulérien pour respecter la contrainte de "Permissible Probe".
     ''', mathjax=True),
     'arbre': dcc.Markdown(r'''
         #### Algorithme 4 : Profondeur
@@ -77,8 +90,25 @@ def _build_probe_step_annotations(path, pos, color):
         annotations.append(dict(x=chosen[0], y=chosen[1], xref="x", yref="y", text=f"<b>{idx + 1}</b>", showarrow=False, font=dict(size=11, color=color), bgcolor="rgba(255, 255, 255, 0.85)", bordercolor=color, borderwidth=1.5, opacity=1.0))
     return annotations
 
+def _build_path_html(path, color):
+    """Génère le panneau affichant le chemin physique de la sonde."""
+    path_str = " ➔ ".join([f"Nœud {n}" if isinstance(n, int) else str(n) for n in path])
+    
+    return html.Div([
+        html.H4("Chemin Optique Emprunté", style={'marginTop': '15px', 'marginBottom': '10px', 'fontSize': '14px', 'color': color}),
+        html.Div(path_str, style={
+            'padding': '12px', 
+            'backgroundColor': '#f8f9fa', 
+            'borderLeft': f'5px solid {color}', 
+            'borderRadius': '4px',
+            'fontFamily': 'monospace', 
+            'fontSize': '13px',
+            'color': '#2C3E50',
+            'boxShadow': '0 1px 3px rgba(0,0,0,0.1)'
+        })
+    ])
+
 def _build_matrix_html(ltp_meta):
-    """Génère le rendu HTML de la matrice de test binaire."""
     if not ltp_meta:
         return html.Div([
             html.P("Mode Naïf ou test global.", style={'color': '#7F8C8D', 'fontStyle': 'italic', 'fontSize': '12px', 'margin': 0}),
@@ -90,27 +120,25 @@ def _build_matrix_html(ltp_meta):
     active_idx = ltp_meta['active_test']
     phase_name = ltp_meta['phase']
 
-    # Entêtes du tableau (noms des items testés)
     headers = [html.Th("Sonde", style={'padding': '5px', 'borderBottom': '1px solid #ddd', 'backgroundColor': '#f8f9fa', 'position': 'sticky', 'left': 0, 'zIndex': 2})]
     for item in items:
-        # Rotation du texte pour gagner de la place horizontalement
         headers.append(html.Th(str(item), style={'padding': '5px', 'borderBottom': '1px solid #ddd', 'fontSize': '10px', 'writingMode': 'vertical-rl', 'transform': 'rotate(180deg)', 'height': '70px', 'textAlign': 'center'}))
     
     rows = []
     for r_idx, row_data in enumerate(matrix):
         is_active = (r_idx == active_idx)
-        row_style = {'backgroundColor': 'rgba(41, 128, 185, 0.15)' if is_active else 'transparent', 'fontWeight': 'bold' if is_active else 'normal'}
+        row_color = PROBE_COLORS[r_idx % len(PROBE_COLORS)]
         
-        # Colonne de gauche (T1, T2...)
-        tds = [html.Td(f"T{r_idx + 1} (bit {r_idx})", style={'padding': '5px', 'borderBottom': '1px solid #eee', 'position': 'sticky', 'left': 0, 'backgroundColor': '#f8f9fa' if not is_active else 'rgba(41, 128, 185, 0.15)', 'zIndex': 1, 'fontSize': '11px'})]
+        bg_style = f"rgba({int(row_color[1:3], 16)}, {int(row_color[3:5], 16)}, {int(row_color[5:7], 16)}, 0.15)" if is_active else 'transparent'
+        row_style = {'backgroundColor': bg_style, 'fontWeight': 'bold' if is_active else 'normal'}
+        
+        tds = [html.Td(f"T{r_idx + 1} (bit {r_idx})", style={'padding': '5px', 'borderBottom': '1px solid #eee', 'position': 'sticky', 'left': 0, 'backgroundColor': bg_style if is_active else '#f8f9fa', 'zIndex': 1, 'fontSize': '11px'})]
         
         for val in row_data:
-            bg = COLORS['accent'] if val == 1 else '#ecf0f1'
+            bg = row_color if (val == 1 and is_active) else (COLORS['accent'] if val == 1 else '#ecf0f1')
             col = 'white' if val == 1 else '#bdc3c7'
-            opacity = '1.0' if is_active else '0.5'
-            tds.append(html.Td(str(val), style={'padding': '2px', 'textAlign': 'center', 'borderBottom': '1px solid #eee'}))
-            # Ajout d'une div interne pour le style du carré
-            tds[-1].children = html.Div(str(val), style={'backgroundColor': bg, 'color': col, 'borderRadius': '3px', 'width': '16px', 'height': '16px', 'lineHeight': '16px', 'margin': 'auto', 'opacity': opacity})
+            opacity = '1.0' if is_active else '0.4'
+            tds.append(html.Td(html.Div(str(val), style={'backgroundColor': bg, 'color': col, 'borderRadius': '3px', 'width': '16px', 'height': '16px', 'lineHeight': '16px', 'margin': 'auto', 'opacity': opacity}), style={'padding': '2px', 'textAlign': 'center', 'borderBottom': '1px solid #eee'}))
             
         rows.append(html.Tr(tds, style=row_style))
 
@@ -126,49 +154,33 @@ def _build_matrix_html(ltp_meta):
     ])
 
 def _build_math_details_html(ltp_meta, topo_type):
-    """Génère le panneau d'explications mathématiques basé sur l'étape courante."""
-    if not ltp_meta:
-        return html.Div()
-
+    if not ltp_meta: return html.Div()
     m = len(ltp_meta['items'])
-    if m == 0:
-        return html.Div()
+    if m == 0: return html.Div()
 
     phase_name = ltp_meta['phase']
-    
-    # Explication spécifique pour le calcul de m
     m_explanation = ""
     if topo_type == 'complet':
         if "Hub" in phase_name:
             m_explanation = f"Éléments testés : les $N-1$ liens directs vers le Hub."
         elif "Cycle" in phase_name:
-             # Retrouver N à partir de m. m = (N-1)(N-2)/2. On a m arêtes distantes pour N-1 nœuds périphériques.
-             # Si on a N nœuds, il y a N-1 nœuds périphériques.
-             # N_periph = N - 1. Combinaisons = N_periph * (N_periph - 1) / 2
-             # Pour simplifier l'affichage, on se base directement sur m et on explique la formule.
              m_explanation = f"Éléments testés : les combinaisons entre les nœuds périphériques. $m = \\frac{{K \\times (K-1)}}{{2}}$ (où $K$ est le nb de nœuds périphériques)."
     
-    # Calcul du nombre de tests (T)
     T = math.ceil(math.log2(m + 1))
     
     return html.Div([
         html.H4("Détails Mathématiques (CGT)", style={'marginTop': '15px', 'marginBottom': '10px', 'fontSize': '14px', 'color': COLORS['accent'], 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
-        
-        # Affichage de m
         html.Div([
             html.Strong("Taille du problème ($m$) : ", style={'fontSize': '12px'}),
             html.Span(f"{m} éléments", style={'fontSize': '12px'}),
             dcc.Markdown(m_explanation, mathjax=True, style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '8px'})
         ]),
-        
-        # Affichage du calcul de T
         html.Div([
             html.Strong("Nombre de sondes ($T$) : ", style={'fontSize': '12px'}),
             dcc.Markdown(f"$T = \\lceil \\log_2(m + 1) \\rceil = \\lceil \\log_2({m} + 1) \\rceil = {T}$ sondes.", mathjax=True, style={'fontSize': '12px', 'display': 'inline-block', 'marginLeft': '5px'}),
             html.P(f"L'algorithme a généré une matrice de {T} lignes pour identifier 1 défaillance parmi {m} éléments.", style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '0'})
         ])
     ], style={'backgroundColor': '#fdfdfe', 'padding': '10px', 'borderRadius': '5px', 'border': '1px solid #e0e0e0', 'marginTop': '15px'})
-
 
 class NetworkEngine:
     def __init__(self, n, topo, mode='naif'):
@@ -200,25 +212,23 @@ class NetworkEngine:
         self.probes.append({
             'path': path, 'step_id': step_id, 'step_name': step_name, 
             'description': description, 'id': len(self.probes) + 1,
-            'ltp_meta': ltp_meta # NOUVEAU: Stockage de la matrice pour cette sonde
+            'ltp_meta': ltp_meta
         })
 
     def _get_ltp_subsets(self, items):
-        """Génère la matrice de tests combinatoires binaires complète."""
         m = len(items)
         if m == 0: return {'subsets': [], 'items': [], 'num_tests': 0, 'matrix': []}
         num_tests = math.ceil(math.log2(m + 1))
         tests = [[] for _ in range(num_tests)]
-        matrix = [] # Construction de la représentation visuelle
+        matrix = [] 
         
         for t in range(num_tests):
             row_bits = []
             for i, item in enumerate(items):
-                val = i + 1 # 0 est réservé au cas "aucune erreur"
+                val = i + 1 
                 bit = (val >> t) & 1
                 row_bits.append(bit)
-                if bit:
-                    tests[t].append(item)
+                if bit: tests[t].append(item)
             matrix.append(row_bits)
             
         return {'subsets': tests, 'items': items, 'num_tests': num_tests, 'matrix': matrix}
@@ -253,6 +263,7 @@ class NetworkEngine:
             for idx, subset in enumerate(ltp_hub['subsets']):
                 if not subset: continue
                 path = [0]
+                # La phase étoile n'a pas de chevauchement redondant, l'aller-retour est déjà valide
                 for node in subset: path.extend([node, 0])
                 meta = {'matrix': ltp_hub['matrix'], 'items': ltp_hub['items'], 'active_test': idx, 'phase': 'Hub (Nœuds)'}
                 self._add_probe(path, f"STAR-LTP-{idx+1}", "LTP Hub", f"Test combinatoire sur les nœuds {subset}.", ltp_meta=meta)
@@ -261,8 +272,34 @@ class NetworkEngine:
             ltp_cycles = self._get_ltp_subsets(other_edges)
             for idx, subset in enumerate(ltp_cycles['subsets']):
                 if not subset: continue
-                path = [0]
-                for u, v in subset: path.extend([u, v, 0])
+                
+                # --- ALGORITHME EULÉRIEN : Permissible Probe ---
+                # On utilise la théorie des graphes pour créer un chemin sans répétition
+                M = nx.MultiGraph()
+                M.add_edges_from(subset)
+                if 0 not in M: M.add_node(0)
+                
+                # 1. On trouve les nœuds impairs pour les relier au Hub
+                degrees = dict(M.degree())
+                odd_nodes = [n for n, d in degrees.items() if d % 2 != 0 and n != 0]
+                for node in odd_nodes:
+                    M.add_edge(0, node)
+                    
+                # 2. On s'assure que tout est connecté au Hub (pour les cycles isolés)
+                components = list(nx.connected_components(M))
+                for comp in components:
+                    if 0 not in comp and len(comp) > 1:
+                        v = list(comp)[0]
+                        M.add_edge(0, v)
+                        M.add_edge(0, v)
+                        
+                # 3. On extrait le circuit Eulérien parfait
+                circuit = list(nx.eulerian_circuit(M, source=0))
+                path = [circuit[0][0]]
+                for u, v in circuit:
+                    path.append(v)
+                # -----------------------------------------------
+                
                 meta = {'matrix': ltp_cycles['matrix'], 'items': ltp_cycles['items'], 'active_test': idx, 'phase': 'Cycles (Arêtes)'}
                 self._add_probe(path, f"CYCLE-LTP-{idx+1}", "LTP Distant", f"Test combinatoire sur {len(subset)} arêtes distantes.", ltp_meta=meta)
 
@@ -387,10 +424,9 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
             html.Div(style={'backgroundColor': COLORS['step_box'], 'padding': '20px', 'borderRadius': '10px', 'border': f'2px solid {COLORS["accent"]}'}, children=[
                 html.H3("Status de l'Algorithme", style={'marginTop': 0, 'color': COLORS['text'], 'fontSize': '18px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '10px'}),
                 html.Div(id='step-display', children=[html.P("En attente de simulation...", style={'color': '#7F8C8D'})]),
-                
                 html.Div(id='matrix-display', style={'marginTop': '15px'}),
-                # NOUVEAU CONTENEUR POUR LES DETAILS MATHS
-                html.Div(id='math-details-display')
+                html.Div(id='math-details-display'),
+                html.Div(id='path-display')
             ]),
             
             html.Div(id='algo-doc', style={'marginTop': '20px', 'fontSize': '13px', 'color': '#555'})
@@ -426,7 +462,8 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('sim-slider', 'value'), 
      Output('step-display', 'children'),
      Output('matrix-display', 'children'),
-     Output('math-details-display', 'children'), # <-- NOUVELLE SORTIE MATHS
+     Output('math-details-display', 'children'),
+     Output('path-display', 'children'),
      Output('counter-display', 'children'),
      Output('algo-doc', 'children'),
      Output('anim-interval', 'disabled'), 
@@ -448,8 +485,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
     fig = go.Figure()
     anim_disabled = True
     btn_text = "▶️ Lecture"
-    matrix_html = html.Div()
-    math_details_html = html.Div()
+    matrix_html, math_details_html, path_html = html.Div(), html.Div(), html.Div()
     
     if ctx_id in ['btn-build', 'algo-mode', None] or not st_t:
         n_final = int(math.sqrt(n_nodes))**2 if topo == 'grille' else n_nodes
@@ -519,27 +555,30 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
         curr = results[s_val - 1]
         probe, is_failed = curr['probe'], curr['failed']
         path = probe['path']
-        col = COLORS['fail'] if is_failed else COLORS['success']
+        
+        test_idx = probe.get('ltp_meta', {}).get('active_test', (s_val - 1)) if probe.get('ltp_meta') else (s_val - 1)
+        dynamic_color = PROBE_COLORS[test_idx % len(PROBE_COLORS)]
         
         px, py = [pos[n][0] for n in path], [pos[n][1] for n in path]
-        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=col), opacity=0.9))
+        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=5, color=dynamic_color), opacity=0.9))
         
         if st_t['type'] in ['grille', 'lineaire']:
-            fig.layout.annotations = _build_probe_step_annotations(path, pos, col)
+            fig.layout.annotations = _build_probe_step_annotations(path, pos, dynamic_color)
         
         if len(path) > 1:
-            fig.add_trace(go.Scatter(x=[px[0]], y=[py[0]], mode='markers', marker=dict(size=12, color=col, symbol='circle')))
-            fig.add_trace(go.Scatter(x=[px[len(path)//2]], y=[py[len(path)//2]], mode='markers', marker=dict(size=10, color=col, symbol='triangle-up')))
+            fig.add_trace(go.Scatter(x=[px[0]], y=[py[0]], mode='markers', marker=dict(size=12, color=dynamic_color, symbol='circle')))
+            fig.add_trace(go.Scatter(x=[px[len(path)//2]], y=[py[len(path)//2]], mode='markers', marker=dict(size=10, color=dynamic_color, symbol='triangle-up')))
 
         status_col = COLORS['fail'] if is_failed else COLORS['success']
         step_content = [
-            html.Div([html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.Span(f"{probe['step_id']} - {probe['step_name']}", style={'fontWeight': 'bold', 'color': COLORS['accent']})]),
+            html.Div([html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.Span(f"{probe['step_id']} - {probe['step_name']}", style={'fontWeight': 'bold', 'color': dynamic_color})]),
             html.Div([html.Span("DESCRIPTION : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.P(probe['description'], style={'fontSize': '14px', 'margin': '5px 0'})]),
             html.Div(style={'backgroundColor': 'white', 'padding': '10px', 'borderLeft': f'5px solid {status_col}'}, children=[html.Span("STATUT : ", style={'fontWeight': 'bold', 'fontSize': '12px'}), html.Span("❌ ÉCHEC" if is_failed else "✅ SUCCÈS", style={'fontWeight': 'bold', 'color': status_col})])
         ]
         
         matrix_html = _build_matrix_html(probe.get('ltp_meta'))
-        math_details_html = _build_math_details_html(probe.get('ltp_meta'), st_t['type']) # Appel pour générer les détails
+        math_details_html = _build_math_details_html(probe.get('ltp_meta'), st_t['type'])
+        path_html = _build_path_html(path, dynamic_color)
     else:
         step_content = [html.P("Aucune sonde générée.", style={'color': '#7F8C8D'})]
 
@@ -551,7 +590,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
         plot_bgcolor=COLORS['bg'], showlegend=False
     )
 
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
 
 if __name__ == '__main__':
     app.run(debug=True)
