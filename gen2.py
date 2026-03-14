@@ -32,7 +32,6 @@ ALGO_DOCS = {
         2. Test global des lignes entières.
         3. Test vertical simultané (échelle) de la k-ième arête de toutes les lignes.
         4. Répétition pour les colonnes.
-        * **Mode LTP :** Fusionne ces étapes avec une matrice de test combinatoire. Le cheminement garantit qu'aucune arête n'est traversée deux fois dans le même sens (Routage Eulérien).
     '''),
     'lineaire': dcc.Markdown(r'''
         #### Algorithme 1 : Fenêtre Glissante
@@ -219,9 +218,8 @@ def _build_math_details_html(ltp_meta, topo_type):
         html.Div([html.Strong("Nombre de sondes ($T$) : ", style={'fontSize': '12px'}), dcc.Markdown(f"$T = \\lceil \\log_2(m + 1) \\rceil = \\lceil \\log_2({m} + 1) \\rceil = {T}$ sondes.", mathjax=True, style={'fontSize': '12px', 'display': 'inline-block', 'marginLeft': '5px'}), html.P(f"L'algorithme a généré une matrice de {T} lignes pour identifier 1 défaillance parmi {m} éléments.", style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '0'})])
     ], style={'backgroundColor': '#fdfdfe', 'padding': '10px', 'borderRadius': '5px', 'border': '1px solid #e0e0e0', 'marginTop': '15px'})
 
-# --- LE DÉCODEUR (Rapport Final) ---
 def _build_diagnosis_report(results, topo, mode, fault_exists):
-    """Calcule la localisation de la panne uniquement en croisant les résultats (0 ou 1) des sondes."""
+    """Calcule la localisation de la panne en croisant les résultats (0 ou 1) des sondes."""
     if not fault_exists:
         return html.Div([
             html.H4("🧠 Décodage du Contrôleur", style={'marginTop': 0, 'color': COLORS['success']}),
@@ -230,7 +228,6 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
 
     report_content = []
 
-    # 1. DÉCODAGE PAR SYNDROME (Matrice Binaire LTP)
     if mode == 'ltp' and topo in ['complet', 'arbre']:
         phases = {}
         for res in results:
@@ -262,7 +259,6 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
         if not fault_found:
             report_content.append(html.P("Panne détectée par une sonde unitaire globale (Hors Matrice LTP).", style={'fontSize': '13px', 'fontStyle': 'italic'}))
 
-    # 2. DÉCODAGE PAR INTERSECTION GÉOMÉTRIQUE (Grille & Linéaire)
     elif topo in ['lineaire', 'grille']:
         safe_edges = set()
         suspect_edges = None
@@ -278,15 +274,14 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
         if suspect_edges is not None:
             final_fault = suspect_edges - safe_edges
             report_content.append(html.Div([
-                html.Strong("Logique d'Intersection (Fenêtre Glissante / Grille)", style={'color': COLORS['accent']}),
+                html.Strong("Logique d'Intersection Spatiale (Théorie des Ensembles)", style={'color': COLORS['accent']}),
                 html.Ul([
-                    html.Li(f"Arêtes suspectes isolées par intersection des échecs."),
-                    html.Li(f"Soustraction des arêtes validées par les sondes saines."),
+                    html.Li("Arêtes suspectes isolées par le croisement strict des sondes en échec."),
+                    html.Li("Soustraction des arêtes de routage validées par les sondes saines."),
                     html.Li(f"Déduction : L'arête défaillante est {list(final_fault)}", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
                 ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
             ]))
 
-    # 3. DÉCODAGE NAÏF
     else:
         for res in results:
             if res['failed']:
@@ -294,7 +289,7 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                     html.Strong("Mode Naïf (Recherche Unitaire)", style={'color': COLORS['accent']}),
                     html.Ul([
                         html.Li(f"Sonde en échec : {res['probe']['step_name']}"),
-                        html.Li(f"Déduction : Panne trouvée par balayage séquentiel.", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
+                        html.Li(f"Déduction : Panne trouvée par balayage séquentiel direct.", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
                     ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
                 ]))
                 break
@@ -304,6 +299,85 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
         html.P("Le contrôleur a collecté l'ensemble des statuts 0 et 1 pour effectuer ses calculs :", style={'fontSize': '12px', 'fontStyle': 'italic', 'color': '#7F8C8D'}),
         *report_content
     ], style={'backgroundColor': '#FDFEFE', 'padding': '15px', 'borderRadius': '5px', 'border': f"2px solid {COLORS['accent']}", 'marginTop': '20px'})
+
+
+# --- NOUVEAU : GÉNERATEUR DE LA FENÊTRE MODALE DÉTAILLÉE ---
+def _build_detailed_modal_content(results, topo, mode):
+    """Construit le contenu complet de la fenêtre popup avec historique et logique."""
+    probe_list = []
+    for r in results:
+        icon = "❌ ÉCHEC" if r['failed'] else "✅ SUCCÈS"
+        col = COLORS['fail'] if r['failed'] else COLORS['success']
+        path_str = " ➔ ".join([str(n) for n in r['probe']['path']])
+        probe_list.append(html.Div([
+            html.Span(f"{icon} | {r['probe']['step_id']} ({r['probe']['step_name']})", style={'fontWeight': 'bold', 'color': col, 'display': 'inline-block', 'width': '250px'}),
+            html.Span(f"Chemin: {path_str}", style={'fontSize': '11px', 'color': '#7f8c8d', 'fontFamily': 'monospace'})
+        ], style={'padding': '8px 0', 'borderBottom': '1px solid #eee'}))
+
+    logic_steps = []
+    
+    # Détails pour Matrice Binaire
+    if mode == 'ltp' and topo in ['complet', 'arbre', 'grille']:
+        phases = {}
+        for res in results:
+            if 'ltp_meta' in res['probe'] and res['probe']['ltp_meta']:
+                meta = res['probe']['ltp_meta']
+                p = meta['phase']
+                if p not in phases: phases[p] = {'bits': {}, 'items': meta['items']}
+                phases[p]['bits'][meta['active_test']] = 1 if res['failed'] else 0
+        
+        for phase, data in phases.items():
+            bits = data['bits']
+            if not bits: continue
+            calc_str = " + ".join([f"{val}*(2^{idx})" for idx, val in bits.items()])
+            syndrome = sum(val * (2**idx) for idx, val in bits.items())
+            bit_str = "".join(str(bits[i]) for i in sorted(bits.keys(), reverse=True))
+            fault_res = f"Élément N°{syndrome} {data['items'][syndrome-1] if syndrome > 0 else '(Sain)'}"
+            
+            logic_steps.append(html.Div([
+                html.H5(f"Analyse Matrice : {phase}", style={'color': COLORS['accent'], 'margin': '10px 0 5px 0'}),
+                html.Ul([
+                    html.Li([html.Strong("Bits relevés (Tn...T1) : "), html.Span(bit_str, style={'fontFamily': 'monospace', 'backgroundColor': '#ecf0f1', 'padding': '2px 5px', 'borderRadius': '3px'})]),
+                    html.Li([html.Strong("Décodage Décimal : "), calc_str + f" = {syndrome}"]),
+                    html.Li([html.Strong("Résultat : "), html.Span(fault_res, style={'fontWeight': 'bold', 'color': COLORS['fail'] if syndrome > 0 else COLORS['success']})])
+                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px'})
+            ]))
+
+    # Détails pour Intersection
+    if topo in ['lineaire', 'grille']:
+        safe_edges = set()
+        suspect_edges = None
+        failed_probes = []
+        success_probes = []
+        for res in results:
+            path = res['probe']['path']
+            edges = set(_normalize_edge(path[i], path[i+1]) for i in range(len(path)-1))
+            if res['failed']:
+                failed_probes.append(res['probe']['step_id'])
+                if suspect_edges is None: suspect_edges = edges
+                else: suspect_edges = suspect_edges.intersection(edges)
+            else:
+                success_probes.append(res['probe']['step_id'])
+                safe_edges = safe_edges.union(edges)
+
+        if suspect_edges is not None:
+            final = suspect_edges - safe_edges
+            logic_steps.append(html.Div([
+                html.H5("Analyse par Intersection d'Ensembles", style={'color': COLORS['accent'], 'margin': '10px 0 5px 0'}),
+                html.Ul([
+                    html.Li([html.Strong("1. Sondes en échec : "), ", ".join(failed_probes)]),
+                    html.Li([html.Strong("2. Arêtes suspectes communes : "), str(list(suspect_edges))]),
+                    html.Li([html.Strong("3. Soustraction des arêtes saines : "), f"-{len(safe_edges)} arêtes éliminées par {len(success_probes)} sondes OK."]),
+                    html.Li([html.Strong("4. Déduction Finale : "), html.Span(str(list(final)), style={'color': COLORS['fail'], 'fontWeight': 'bold', 'fontSize': '14px'})])
+                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px'})
+            ]))
+
+    return html.Div([
+        html.H4("1. Historique Brut des Sondes (Collecte)", style={'color': '#2C3E50', 'marginTop': '10px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
+        html.Div(probe_list, style={'backgroundColor': '#fff', 'border': '1px solid #ddd', 'padding': '10px', 'borderRadius': '5px', 'maxHeight': '250px', 'overflowY': 'auto', 'marginBottom': '20px'}),
+        html.H4("2. Démonstration Mathématique du Calcul", style={'color': '#2C3E50', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
+        html.Div(logic_steps)
+    ])
 
 
 class NetworkEngine:
@@ -433,11 +507,9 @@ class NetworkEngine:
         s = int(math.sqrt(self.n))
         origin = (0,0)
 
-        # 1a. Col 0 Globale
         path = [(r, 0) for r in range(s)] + [(r, 0) for r in range(s-2, -1, -1)]
         self._add_probe(path, "1a", "Axe Vertical", "Test global de la Colonne 0.")
 
-        # 1b. Col 0
         if self.mode == 'naif':
             for r in range(s-1):
                 p = self._get_path(origin, (r,0)) + [(r,1), (r+1,1)] + self._get_path((r+1,0), origin)
@@ -455,11 +527,9 @@ class NetworkEngine:
                 meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Colonne 0'}
                 self._add_probe(p, f"1b-LTP-{idx+1}", "LTP Col 0", f"Test combinatoire sur Col 0 (bit {idx}).", ltp_meta=meta)
 
-        # 2a. Row 0 Globale
         path = [(0, c) for c in range(s)] + [(0, c) for c in range(s-2, -1, -1)]
         self._add_probe(path, "2a", "Axe Horizontal", "Test global de la Ligne 0.")
 
-        # 2b. Row 0
         if self.mode == 'naif':
             for c in range(s-1):
                 p = self._get_path(origin, (0,c)) + [(1,c), (1,c+1)] + self._get_path((0,c+1), origin)
@@ -477,7 +547,6 @@ class NetworkEngine:
                 meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Ligne 0'}
                 self._add_probe(p, f"2b-LTP-{idx+1}", "LTP Ligne 0", f"Test combinatoire sur Ligne 0 (bit {idx}).", ltp_meta=meta)
 
-        # 3a. Lignes Globales
         if self.mode == 'naif':
             for r in range(1, s):
                 p = self._get_path(origin, (r,0)) 
@@ -500,7 +569,6 @@ class NetworkEngine:
                 meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Lignes Globales'}
                 self._add_probe(p, f"3a-LTP-{idx+1}", "LTP Lignes", f"Test combinatoire sur Lignes (bit {idx}).", ltp_meta=meta)
 
-        # 3b. Échelle Verticale
         if self.mode == 'naif':
             for k in range(s-1):
                 path = self._get_path(origin, (0,k))
@@ -526,7 +594,6 @@ class NetworkEngine:
                 meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Échelle Vert.'}
                 self._add_probe(p, f"3b-LTP-{idx+1}", "LTP Échelle V.", f"Test combinatoire des arêtes horizontales (bit {idx}).", ltp_meta=meta)
 
-        # 4a. Colonnes Globales
         if self.mode == 'naif':
             for c in range(1, s):
                 p = self._get_path(origin, (0,c))
@@ -549,7 +616,6 @@ class NetworkEngine:
                 meta = {'matrix': ltp_data['matrix'], 'items': ltp_data['items'], 'active_test': idx, 'phase': 'Colonnes Globales'}
                 self._add_probe(p, f"4a-LTP-{idx+1}", "LTP Colonnes", f"Test combinatoire sur Colonnes (bit {idx}).", ltp_meta=meta)
 
-        # 4b. Échelle Horizontale
         if self.mode == 'naif':
             for k in range(s-1):
                 path = self._get_path(origin, (k,0))
@@ -631,7 +697,12 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                 html.Div(id='matrix-display', style={'marginTop': '15px'}),
                 html.Div(id='math-details-display'),
                 html.Div(id='path-display'),
-                html.Div(id='diagnosis-report-display')
+                html.Div(id='diagnosis-report-display'),
+                
+                # --- NOUVEAU CONTENEUR POUR LE BOUTON DU MODAL ---
+                html.Div(id='modal-btn-container', style={'display': 'none'}, children=[
+                    html.Button("🔍 Voir le détail complet des sondes et du calcul", id='btn-open-modal', style={'marginTop': '10px', 'padding': '10px', 'backgroundColor': '#34495E', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'width': '100%', 'fontWeight': 'bold'})
+                ])
             ]),
             
             html.Div(id='algo-doc', style={'marginTop': '20px', 'fontSize': '13px', 'color': '#555'})
@@ -649,6 +720,15 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                 ]),
                 html.Div(id='counter-display', style={'fontWeight': 'bold', 'color': COLORS['text'], 'minWidth': '120px', 'textAlign': 'right'})
             ])
+        ])
+    ]),
+
+    # --- NOUVEAU : LA FENÊTRE MODALE POP-UP ---
+    html.Div(id='modal-overlay', style={'display': 'none'}, children=[
+        html.Div(style={'backgroundColor': 'white', 'margin': '5% auto', 'padding': '30px', 'border': '1px solid #888', 'width': '80%', 'maxWidth': '800px', 'borderRadius': '10px', 'maxHeight': '80vh', 'overflowY': 'auto', 'boxShadow': '0 4px 8px rgba(0,0,0,0.2)'}, children=[
+            html.H2("🔍 Historique et Déduction Détaillée", style={'marginTop': 0, 'color': COLORS['accent'], 'borderBottom': '2px solid #eee', 'paddingBottom': '10px'}),
+            html.Div(id='modal-content'),
+            html.Button("Fermer la fenêtre", id='btn-close-modal', style={'marginTop': '20px', 'padding': '10px 20px', 'backgroundColor': COLORS['fail'], 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold', 'width': '100%'})
         ])
     ]),
 
@@ -670,6 +750,8 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('math-details-display', 'children'),
      Output('path-display', 'children'),
      Output('diagnosis-report-display', 'children'),
+     Output('modal-btn-container', 'style'),   # <-- SORTIE DU BOUTON MODAL
+     Output('modal-content', 'children'),      # <-- SORTIE DU CONTENU MODAL
      Output('counter-display', 'children'),
      Output('algo-doc', 'children'),
      Output('anim-interval', 'disabled'), 
@@ -692,6 +774,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
     anim_disabled = True
     btn_text = "▶️ Lecture"
     matrix_html, math_details_html, path_html, diagnosis_html = html.Div(), html.Div(), html.Div(), html.Div()
+    modal_btn_style = {'display': 'none'}
+    modal_content_html = html.Div()
     
     if ctx_id in ['btn-build', 'algo-mode', None] or not st_t:
         n_final = int(math.sqrt(n_nodes))**2 if topo == 'grille' else n_nodes
@@ -797,6 +881,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
 
         if s_val == max_s:
             diagnosis_html = _build_diagnosis_report(results, st_t['type'], st_t.get('mode', 'naif'), st_f is not None)
+            modal_btn_style = {'display': 'block'} # <-- AFFICHE LE BOUTON MODAL
+            modal_content_html = _build_detailed_modal_content(results, st_t['type'], st_t.get('mode', 'naif')) # <-- GÉNÈRE LE CONTENU MODAL
         else:
             diagnosis_html = html.Div(
                 "Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...",
@@ -810,7 +896,21 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
 
     fig.update_layout(margin=dict(l=20,r=20,t=20,b=20), xaxis={'visible':False}, yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':1 if st_t['type']=='grille' else None}, plot_bgcolor=COLORS['bg'], showlegend=False)
 
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
+
+
+# --- CALLBACK POUR OUVRIR/FERMER LE MODAL ---
+@app.callback(
+    Output('modal-overlay', 'style'),
+    [Input('btn-open-modal', 'n_clicks'),
+     Input('btn-close-modal', 'n_clicks')],
+    prevent_initial_call=True
+)
+def toggle_modal(n_open, n_close):
+    ctx_id = ctx.triggered_id
+    if ctx_id == 'btn-open-modal':
+        return {'display': 'block', 'position': 'fixed', 'zIndex': 1000, 'left': 0, 'top': 0, 'width': '100%', 'height': '100%', 'backgroundColor': 'rgba(0,0,0,0.6)'}
+    return {'display': 'none'}
 
 if __name__ == '__main__':
     app.run(debug=True)
