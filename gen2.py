@@ -301,9 +301,11 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
     ], style={'backgroundColor': '#FDFEFE', 'padding': '15px', 'borderRadius': '5px', 'border': f"2px solid {COLORS['accent']}", 'marginTop': '20px'})
 
 
-# --- NOUVEAU : GÉNERATEUR DE LA FENÊTRE MODALE DÉTAILLÉE ---
+# --- EXPLICATIONS PÉDAGOGIQUES DU MODAL ---
 def _build_detailed_modal_content(results, topo, mode):
-    """Construit le contenu complet de la fenêtre popup avec historique et logique."""
+    """Construit le contenu complet de la fenêtre popup avec des explications faciles pour les débutants."""
+    
+    # 1. HISTORIQUE DES SONDES
     probe_list = []
     for r in results:
         icon = "❌ ÉCHEC" if r['failed'] else "✅ SUCCÈS"
@@ -316,8 +318,14 @@ def _build_detailed_modal_content(results, topo, mode):
 
     logic_steps = []
     
-    # Détails pour Matrice Binaire
+    # 2A. EXPLICATION POUR LE DÉCODAGE MATRICIEL (LTP)
     if mode == 'ltp' and topo in ['complet', 'arbre', 'grille']:
+        
+        logic_steps.append(html.Div([
+            html.P("💡 Comment fonctionne la matrice ?", style={'fontWeight': 'bold', 'color': COLORS['accent'], 'marginBottom': '5px'}),
+            html.P("Chaque sonde est comme une question posée au réseau. Si la sonde échoue, la réponse est '1' (Oui, le coupable est dans ce groupe). Si elle réussit, la réponse est '0' (Non). En mettant toutes ces réponses bout à bout, on obtient un mot binaire qui correspond exactement au numéro d'identification de la panne !", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'})
+        ]))
+        
         phases = {}
         for res in results:
             if 'ltp_meta' in res['probe'] and res['probe']['ltp_meta']:
@@ -332,18 +340,36 @@ def _build_detailed_modal_content(results, topo, mode):
             calc_str = " + ".join([f"{val}*(2^{idx})" for idx, val in bits.items()])
             syndrome = sum(val * (2**idx) for idx, val in bits.items())
             bit_str = "".join(str(bits[i]) for i in sorted(bits.keys(), reverse=True))
-            fault_res = f"Élément N°{syndrome} {data['items'][syndrome-1] if syndrome > 0 else '(Sain)'}"
+            
+            if syndrome > 0:
+                fault_res = f"La panne est l'élément N°{syndrome} (qui correspond à {data['items'][syndrome-1]})."
+                res_color = COLORS['fail']
+            else:
+                fault_res = "Valeur 0 = Aucun élément de ce groupe n'est en panne (Sain)."
+                res_color = COLORS['success']
+                
+            # NOUVEAU : Ajout de la description descriptive du groupe testé
+            phase_desc = ""
+            if "Hub" in phase: phase_desc = " (Les connexions directes au centre)"
+            elif "Cycle" in phase: phase_desc = " (Les connexions distantes entre voisins)"
+            elif "Colonne 0" in phase: phase_desc = " (Vérification de l'axe vertical de référence)"
+            elif "Ligne 0" in phase: phase_desc = " (Vérification de l'axe horizontal de référence)"
+            elif "Lignes Globales" in phase: phase_desc = " (Groupement de lignes entières)"
+            elif "Colonnes Globales" in phase: phase_desc = " (Groupement de colonnes entières)"
+            elif "Échelle Vert" in phase: phase_desc = " (Groupement des k-ièmes arêtes horizontales)"
+            elif "Échelle Horiz" in phase: phase_desc = " (Groupement des k-ièmes arêtes verticales)"
+            elif "Profondeur" in phase: phase_desc = " (Nœuds au même niveau)"
             
             logic_steps.append(html.Div([
-                html.H5(f"Analyse Matrice : {phase}", style={'color': COLORS['accent'], 'margin': '10px 0 5px 0'}),
+                html.H5([f"Analyse du groupe : {phase}", html.Span(phase_desc, style={'fontSize': '12px', 'color': '#7F8C8D', 'fontWeight': 'normal', 'marginLeft': '5px'})], style={'color': '#2C3E50', 'margin': '10px 0 5px 0', 'borderBottom': '1px dotted #ccc', 'paddingBottom': '5px'}),
                 html.Ul([
-                    html.Li([html.Strong("Bits relevés (Tn...T1) : "), html.Span(bit_str, style={'fontFamily': 'monospace', 'backgroundColor': '#ecf0f1', 'padding': '2px 5px', 'borderRadius': '3px'})]),
-                    html.Li([html.Strong("Décodage Décimal : "), calc_str + f" = {syndrome}"]),
-                    html.Li([html.Strong("Résultat : "), html.Span(fault_res, style={'fontWeight': 'bold', 'color': COLORS['fail'] if syndrome > 0 else COLORS['success']})])
-                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px'})
+                    html.Li([html.Strong("Réponses collectées (Code Binaire) : "), html.Span(bit_str, style={'fontFamily': 'monospace', 'backgroundColor': '#ecf0f1', 'padding': '2px 5px', 'borderRadius': '3px'})]),
+                    html.Li([html.Strong("Traduction en Décimal (Calcul) : "), calc_str + f" = {syndrome}"]),
+                    html.Li([html.Strong("Conclusion : "), html.Span(fault_res, style={'fontWeight': 'bold', 'color': res_color})])
+                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px', 'listStyleType': 'square'})
             ]))
 
-    # Détails pour Intersection
+    # 2B. EXPLICATION POUR LE DÉCODAGE PAR INTERSECTION (Grille et Linéaire)
     if topo in ['lineaire', 'grille']:
         safe_edges = set()
         suspect_edges = None
@@ -362,23 +388,29 @@ def _build_detailed_modal_content(results, topo, mode):
 
         if suspect_edges is not None:
             final = suspect_edges - safe_edges
+            
             logic_steps.append(html.Div([
-                html.H5("Analyse par Intersection d'Ensembles", style={'color': COLORS['accent'], 'margin': '10px 0 5px 0'}),
+                html.P("💡 Comment fonctionne l'intersection ?", style={'fontWeight': 'bold', 'color': COLORS['accent'], 'marginBottom': '5px'}),
+                html.P("L'algorithme réfléchit comme un détective. D'abord, il regarde toutes les sondes qui ont échoué et cherche leur 'carrefour commun' (l'intersection). Ensuite, pour être sûr de ne pas se tromper, il élimine de la liste des suspects toutes les routes qui ont été empruntées par les sondes saines (en vert). Le seul lien qui reste à la fin est le coupable !", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'})
+            ]))
+            
+            logic_steps.append(html.Div([
+                html.H5("Détail du croisement géométrique", style={'color': '#2C3E50', 'margin': '10px 0 5px 0', 'borderBottom': '1px dotted #ccc', 'paddingBottom': '5px'}),
                 html.Ul([
-                    html.Li([html.Strong("1. Sondes en échec : "), ", ".join(failed_probes)]),
-                    html.Li([html.Strong("2. Arêtes suspectes communes : "), str(list(suspect_edges))]),
-                    html.Li([html.Strong("3. Soustraction des arêtes saines : "), f"-{len(safe_edges)} arêtes éliminées par {len(success_probes)} sondes OK."]),
-                    html.Li([html.Strong("4. Déduction Finale : "), html.Span(str(list(final)), style={'color': COLORS['fail'], 'fontWeight': 'bold', 'fontSize': '14px'})])
-                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px'})
+                    html.Li([html.Strong("🔍 Étape 1 (Les accidents) : "), f"Les sondes suivantes ont toutes échoué : {', '.join(failed_probes)}."]),
+                    html.Li([html.Strong("📍 Étape 2 (Les suspects communs) : "), "L'intersection de tous leurs chemins nous donne cette liste de liens potentiellement coupables : ", html.Br(), str(list(suspect_edges))]),
+                    html.Li([html.Strong("✅ Étape 3 (L'innocentation) : "), f"Nous avons {len(success_probes)} sondes qui ont réussi à passer. Elles ont prouvé que {len(safe_edges)} liens utilisés pour le routage sont parfaitement sains. On les raye de la liste des suspects."]),
+                    html.Li([html.Strong("🚨 Étape 4 (Le coupable final) : "), "Par élimination totale, la panne se trouve avec certitude sur : ", html.Span(str(list(final)), style={'color': COLORS['fail'], 'fontWeight': 'bold', 'fontSize': '14px'})])
+                ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px', 'listStyleType': 'none'})
             ]))
 
     return html.Div([
-        html.H4("1. Historique Brut des Sondes (Collecte)", style={'color': '#2C3E50', 'marginTop': '10px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
+        html.H4("1. Historique Brut des Sondes (La Collecte)", style={'color': '#2C3E50', 'marginTop': '10px', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
+        html.P("Ceci est le journal de bord du contrôleur réseau. Il a envoyé toutes ces sondes à l'aveugle et a noté leur statut.", style={'fontSize': '12px', 'color': '#7F8C8D'}),
         html.Div(probe_list, style={'backgroundColor': '#fff', 'border': '1px solid #ddd', 'padding': '10px', 'borderRadius': '5px', 'maxHeight': '250px', 'overflowY': 'auto', 'marginBottom': '20px'}),
-        html.H4("2. Démonstration Mathématique du Calcul", style={'color': '#2C3E50', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
+        html.H4("2. Démonstration Mathématique (Le Diagnostic)", style={'color': '#2C3E50', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
         html.Div(logic_steps)
     ])
-
 
 class NetworkEngine:
     def __init__(self, n, topo, mode='naif'):
@@ -699,7 +731,6 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                 html.Div(id='path-display'),
                 html.Div(id='diagnosis-report-display'),
                 
-                # --- NOUVEAU CONTENEUR POUR LE BOUTON DU MODAL ---
                 html.Div(id='modal-btn-container', style={'display': 'none'}, children=[
                     html.Button("🔍 Voir le détail complet des sondes et du calcul", id='btn-open-modal', style={'marginTop': '10px', 'padding': '10px', 'backgroundColor': '#34495E', 'color': 'white', 'border': 'none', 'borderRadius': '5px', 'cursor': 'pointer', 'width': '100%', 'fontWeight': 'bold'})
                 ])
@@ -723,7 +754,6 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
         ])
     ]),
 
-    # --- NOUVEAU : LA FENÊTRE MODALE POP-UP ---
     html.Div(id='modal-overlay', style={'display': 'none'}, children=[
         html.Div(style={'backgroundColor': 'white', 'margin': '5% auto', 'padding': '30px', 'border': '1px solid #888', 'width': '80%', 'maxWidth': '800px', 'borderRadius': '10px', 'maxHeight': '80vh', 'overflowY': 'auto', 'boxShadow': '0 4px 8px rgba(0,0,0,0.2)'}, children=[
             html.H2("🔍 Historique et Déduction Détaillée", style={'marginTop': 0, 'color': COLORS['accent'], 'borderBottom': '2px solid #eee', 'paddingBottom': '10px'}),
@@ -750,8 +780,8 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('math-details-display', 'children'),
      Output('path-display', 'children'),
      Output('diagnosis-report-display', 'children'),
-     Output('modal-btn-container', 'style'),   # <-- SORTIE DU BOUTON MODAL
-     Output('modal-content', 'children'),      # <-- SORTIE DU CONTENU MODAL
+     Output('modal-btn-container', 'style'),
+     Output('modal-content', 'children'),
      Output('counter-display', 'children'),
      Output('algo-doc', 'children'),
      Output('anim-interval', 'disabled'), 
@@ -881,8 +911,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
 
         if s_val == max_s:
             diagnosis_html = _build_diagnosis_report(results, st_t['type'], st_t.get('mode', 'naif'), st_f is not None)
-            modal_btn_style = {'display': 'block'} # <-- AFFICHE LE BOUTON MODAL
-            modal_content_html = _build_detailed_modal_content(results, st_t['type'], st_t.get('mode', 'naif')) # <-- GÉNÈRE LE CONTENU MODAL
+            modal_btn_style = {'display': 'block'} 
+            modal_content_html = _build_detailed_modal_content(results, st_t['type'], st_t.get('mode', 'naif')) 
         else:
             diagnosis_html = html.Div(
                 "Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...",
@@ -898,8 +928,6 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
 
     return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text
 
-
-# --- CALLBACK POUR OUVRIR/FERMER LE MODAL ---
 @app.callback(
     Output('modal-overlay', 'style'),
     [Input('btn-open-modal', 'n_clicks'),
