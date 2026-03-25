@@ -230,6 +230,8 @@ def _build_math_details_html(ltp_meta, topo_type):
                 m_explanation = "Éléments testés : Profondeurs d'éloignement (Théorie pure LTP de l'article)."
         elif "Strate" in phase_name: 
             m_explanation = "Éléments testés : Chemins Préférés appartenant à cette Strate de profondeur légère."
+        elif "Chemins Préférés" in phase_name:
+            m_explanation = "Éléments testés : Tous les Chemins Préférés de l'arbre (Théorie pure globale, O(log N))."
             
     if topo_type == 'arbre' and "Absolue" in phase_name and ltp_meta.get('variant') == 'physique':
         T = m
@@ -262,14 +264,14 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                 meta = res['probe']['ltp_meta']
                 phase = meta['phase']
                 if phase not in phases:
-                    phases[phase] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld'), 'variant': meta.get('variant')}
+                    phases[phase] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld', 0), 'variant': meta.get('variant')}
                 phases[phase]['bits'][meta['active_test']] = 1 if res['failed'] else 0
         
         # Tri Top-Down pour l'arbre
         sorted_phases = []
         if topo == 'arbre':
             depth_phase = [p for p, d in phases.items() if d.get('type') == 'depth']
-            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x]['ld'])
+            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x].get('ld', 0))
             sorted_phases = depth_phase + path_phases
         else:
             sorted_phases = list(phases.keys())
@@ -310,7 +312,7 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                     if syndrome - 1 < len(data['items']):
                         fault_item = data['items'][syndrome - 1]
                         warning_text = ""
-                        if topo == 'arbre' and data.get('type') == 'depth' and data.get('variant') == 'theorique':
+                        if topo == 'arbre' and data.get('variant') == 'theorique':
                             warning_text = " (⚠️ Syndrome souvent faussé par le masquage physique !)"
                     else:
                         fault_item = f"Index {syndrome} INCONNU"
@@ -395,7 +397,7 @@ def _build_detailed_modal_content(results, topo, mode):
             if 'ltp_meta' in res['probe'] and res['probe']['ltp_meta']:
                 meta = res['probe']['ltp_meta']
                 p = meta['phase']
-                if p not in phases: phases[p] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld'), 'variant': meta.get('variant')}
+                if p not in phases: phases[p] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld', 0), 'variant': meta.get('variant')}
                 phases[p]['bits'][meta['active_test']] = 1 if res['failed'] else 0
         
         faulty_depth = None
@@ -406,7 +408,7 @@ def _build_detailed_modal_content(results, topo, mode):
         sorted_phases = []
         if topo == 'arbre':
             depth_phase = [p for p, d in phases.items() if d.get('type') == 'depth']
-            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x]['ld'])
+            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x].get('ld', 0))
             sorted_phases = depth_phase + path_phases
         else:
             sorted_phases = list(phases.keys())
@@ -474,6 +476,7 @@ def _build_detailed_modal_content(results, topo, mode):
             elif "Échelle Horiz" in phase: phase_desc = " (Groupement des k-ièmes arêtes verticales)"
             elif "Profondeur Absolue" in phase: phase_desc = " (Matrice LTP ou Diagonale)"
             elif "Strate" in phase: phase_desc = " (Détection Top-Down de l'autoroute HLD)"
+            elif "Chemins Préférés" in phase: phase_desc = " (Détection globale théorique)"
             
             logic_steps.append(html.Div([
                 html.H5([f"Analyse du groupe : {phase}", html.Span(phase_desc, style={'fontSize': '12px', 'color': '#7F8C8D', 'fontWeight': 'normal', 'marginLeft': '5px'})], style={'color': '#2C3E50', 'margin': '10px 0 5px 0', 'borderBottom': '1px dotted #ccc', 'paddingBottom': '5px'}),
@@ -794,14 +797,33 @@ class NetworkEngine:
                     meta = {'matrix': ltp_depth['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue', 'type': 'depth', 'variant': 'theorique'}
                     self._add_probe(full_route, f"DEPTH-{idx+1}", "LTP Profondeur", f"Sondage O(log N) aux prof. {subset}.", ltp_meta=meta, target_edges=t_edges)
 
-            paths_by_ld = {}
-            for pid, ld in self.light_depth_of_path.items():
-                if ld not in paths_by_ld: paths_by_ld[ld] = []
-                paths_by_ld[ld].append(pid)
-                
-            for ld in sorted(paths_by_ld.keys()):
-                pids = paths_by_ld[ld]
-                ltp_paths = self._get_ltp_subsets(pids)
+            # --- LE CHOIX DE LA VARIANTE POUR LES CHEMINS (AXE X) ---
+            if self.tree_variant == 'physique':
+                paths_by_ld = {}
+                for pid, ld in self.light_depth_of_path.items():
+                    if ld not in paths_by_ld: paths_by_ld[ld] = []
+                    paths_by_ld[ld].append(pid)
+                    
+                for ld in sorted(paths_by_ld.keys()):
+                    pids = paths_by_ld[ld]
+                    ltp_paths = self._get_ltp_subsets(pids)
+                    
+                    for idx, subset in enumerate(ltp_paths['subsets']):
+                        if not subset: continue
+                        t_edges = []
+                        for pid in subset:
+                            path_nodes = self.preferred_paths[pid]
+                            for i in range(len(path_nodes)-1):
+                                t_edges.append((path_nodes[i], path_nodes[i+1]))
+                                
+                        full_route = get_dfs_route(t_edges)
+                        items_str = [f"Chemin {p}" for p in ltp_paths['items']]
+                        meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': f'Strate {ld} (Chemins)', 'type': 'path', 'ld': ld, 'variant': 'physique'}
+                        self._add_probe(full_route, f"HLD-L{ld}-{idx+1}", f"LTP Strate {ld}", f"Sondage des Chemins de la Strate {ld} : {subset}.", ltp_meta=meta, target_edges=t_edges)
+            else:
+                # Mode Théorique : UNE SEULE matrice LTP pour TOUS les chemins (Strict respect de l'article)
+                all_pids = list(range(len(self.preferred_paths)))
+                ltp_paths = self._get_ltp_subsets(all_pids)
                 
                 for idx, subset in enumerate(ltp_paths['subsets']):
                     if not subset: continue
@@ -813,8 +835,9 @@ class NetworkEngine:
                             
                     full_route = get_dfs_route(t_edges)
                     items_str = [f"Chemin {p}" for p in ltp_paths['items']]
-                    meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': f'Strate {ld} (Chemins)', 'type': 'path', 'ld': ld}
-                    self._add_probe(full_route, f"HLD-L{ld}-{idx+1}", f"LTP Strate {ld}", f"Sondage des Chemins de la Strate {ld} : {subset}.", ltp_meta=meta, target_edges=t_edges)
+                    meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Chemins Préférés (Global)', 'type': 'path', 'ld': 0, 'variant': 'theorique'}
+                    self._add_probe(full_route, f"HLD-GL-{idx+1}", "LTP Chemins", f"Sondage O(log P) de tous les chemins : {subset}.", ltp_meta=meta, target_edges=t_edges)
+
 
     def _generate_grid_algo(self):
         s = int(math.sqrt(self.n))
@@ -1288,3 +1311,11 @@ def toggle_modal(n_open, n_close):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+    """
+        Question : je ne comprends pas pourquoi dans la partie pour les arbres
+        generalement dans l'article on suit un mode static alors eux decrivent une approche 
+        dynamique qui semble plus robuste au masquage(la partie ou ils parlent d'envoyer des sondes)
+        profondeur par pronfondeur (For each depth d ∈ [0, D − 1] , probe the sub-tree containing
+the root and all nodes up to depth d .) ici je ne sais pas si on doit appliquer LTP ou pas ?
+    """
