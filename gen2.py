@@ -46,11 +46,11 @@ ALGO_DOCS = {
     ''', mathjax=True),
     'arbre': dcc.Markdown(r'''
         #### Algorithme 4 : Arbre (Heavy-Light Decomposition)
-        **Stratégie Mathématique Exacte :**
+        **Stratégie Mathématique Exacte (Top-Down) :**
         1. **Poids :** Calcul du nombre de descendants par nœud.
         2. **HLD :** Création des "Chemins Préférés" via les arêtes lourdes.
-        3. **Double LTP :** Sondage combinatoire sur les Profondeurs Absolues, puis sondage combinatoire global sur les Chemins Préférés.
-        4. **Décodage :** Intersection du chemin coupable et de la profondeur coupable.
+        3. **Strates :** Sondage combinatoire découpé par *Profondeur Légère* (Strate 0, Strate 1...).
+        4. **Variante :** L'article théorique utilise le LTP pour les profondeurs, mais la réalité physique impose parfois un balayage (Diagonale) pour éviter le masquage.
     ''', mathjax=True)
 }
 
@@ -204,7 +204,7 @@ def _build_matrix_html(ltp_meta):
         rows.append(html.Tr(tds, style=row_style))
 
     return html.Div([
-        html.H4(f"Matrice LTP : {phase_name}", style={'marginTop': '0', 'marginBottom': '5px', 'fontSize': '13px', 'color': COLORS['text'], 'textTransform': 'uppercase'}),
+        html.H4(f"Matrice : {phase_name}", style={'marginTop': '0', 'marginBottom': '5px', 'fontSize': '13px', 'color': COLORS['text'], 'textTransform': 'uppercase'}),
         html.Div(html.Table([html.Thead(html.Tr(headers))] + [html.Tbody(rows)], style={'borderCollapse': 'collapse', 'width': '100%', 'fontSize': '12px', 'minWidth': 'max-content'}), style={'overflowX': 'auto', 'maxHeight': '200px', 'overflowY': 'auto', 'border': '1px solid #ddd', 'borderRadius': '5px', 'backgroundColor': 'white'})
     ])
 
@@ -223,14 +223,27 @@ def _build_math_details_html(ltp_meta, topo_type):
         elif "Globales" in phase_name: m_explanation = "Éléments testés : les lignes/colonnes entières (macro-élément)."
         elif "Échelle" in phase_name: m_explanation = "Éléments testés : groupement des $k$-ièmes arêtes."
     elif topo_type == 'arbre':
-        if "Absolue" in phase_name: m_explanation = "Éléments testés : Profondeurs d'éloignement depuis la racine."
-        elif "Préférés" in phase_name: m_explanation = "Éléments testés : Chemins Préférés de la décomposition Lourd-Léger."
+        if "Absolue" in phase_name:
+            if ltp_meta.get('variant') == 'physique':
+                m_explanation = "Éléments testés : Profondeurs d'éloignement (Matrice Diagonale Anti-Cascade)."
+            else:
+                m_explanation = "Éléments testés : Profondeurs d'éloignement (Théorie pure LTP de l'article)."
+        elif "Strate" in phase_name: 
+            m_explanation = "Éléments testés : Chemins Préférés appartenant à cette Strate de profondeur légère."
             
-    T = math.ceil(math.log2(m + 1))
+    if topo_type == 'arbre' and "Absolue" in phase_name and ltp_meta.get('variant') == 'physique':
+        T = m
+        formula = f"$T = m = {m}$ sondes."
+        explanation_text = f"Matrice diagonale séquentielle de {T} lignes pour éviter l'effet de masquage physique du laser."
+    else:
+        T = math.ceil(math.log2(m + 1))
+        formula = f"$T = \\lceil \\log_2(m + 1) \\rceil = {T}$ sondes."
+        explanation_text = f"L'algorithme a généré une matrice compressée de {T} lignes pour identifier 1 défaillance parmi {m} éléments."
+
     return html.Div([
         html.H4("Détails Mathématiques (CGT)", style={'marginTop': '15px', 'marginBottom': '10px', 'fontSize': '14px', 'color': COLORS['accent'], 'borderBottom': '1px solid #eee', 'paddingBottom': '5px'}),
         html.Div([html.Strong("Taille du problème ($m$) : ", style={'fontSize': '12px'}), html.Span(f"{m} éléments", style={'fontSize': '12px'}), dcc.Markdown(m_explanation, mathjax=True, style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '8px'})]),
-        html.Div([html.Strong("Nombre de sondes ($T$) : ", style={'fontSize': '12px'}), dcc.Markdown(f"$T = \\lceil \\log_2(m + 1) \\rceil = \\lceil \\log_2({m} + 1) \\rceil = {T}$ sondes.", mathjax=True, style={'fontSize': '12px', 'display': 'inline-block', 'marginLeft': '5px'}), html.P(f"L'algorithme a généré une matrice de {T} lignes pour identifier 1 défaillance parmi {m} éléments.", style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '0'})])
+        html.Div([html.Strong("Nombre de sondes ($T$) : ", style={'fontSize': '12px'}), dcc.Markdown(formula, mathjax=True, style={'fontSize': '12px', 'display': 'inline-block', 'marginLeft': '5px'}), html.P(explanation_text, style={'fontSize': '11px', 'color': '#7F8C8D', 'marginTop': '2px', 'marginBottom': '0'})])
     ], style={'backgroundColor': '#fdfdfe', 'padding': '10px', 'borderRadius': '5px', 'border': '1px solid #e0e0e0', 'marginTop': '15px'})
 
 def _build_diagnosis_report(results, topo, mode, fault_exists):
@@ -249,26 +262,70 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                 meta = res['probe']['ltp_meta']
                 phase = meta['phase']
                 if phase not in phases:
-                    phases[phase] = {'bits': {}, 'items': meta['items']}
+                    phases[phase] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld'), 'variant': meta.get('variant')}
                 phases[phase]['bits'][meta['active_test']] = 1 if res['failed'] else 0
         
+        # Tri Top-Down pour l'arbre
+        sorted_phases = []
+        if topo == 'arbre':
+            depth_phase = [p for p, d in phases.items() if d.get('type') == 'depth']
+            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x]['ld'])
+            sorted_phases = depth_phase + path_phases
+        else:
+            sorted_phases = list(phases.keys())
+
         fault_found = False
-        for phase, data in phases.items():
+        strate_stop = False
+        
+        for phase in sorted_phases:
+            data = phases[phase]
             bits = data['bits']
             if not bits: continue
-            syndrome = sum(val * (2**idx) for idx, val in bits.items())
-            if syndrome > 0:
-                fault_found = True
-                fault_item = data['items'][syndrome - 1]
-                bit_str = "".join(str(bits[i]) for i in sorted(bits.keys(), reverse=True))
-                report_content.append(html.Div([
-                    html.Strong(f"Analyse de la phase : {phase}", style={'color': COLORS['accent']}),
-                    html.Ul([
-                        html.Li(f"Vecteur binaire lu (T_n ... T1) : {bit_str}"),
-                        html.Li(f"Conversion en Syndrome décimal : {syndrome}"),
-                        html.Li(f"Déduction : L'élément fautif correspond à l'index {syndrome} => {fault_item}", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
-                    ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
-                ], style={'marginBottom': '10px'}))
+            
+            if topo == 'arbre' and data.get('type') == 'path' and strate_stop:
+                continue 
+                
+            bit_str = "".join(str(bits[i]) for i in sorted(bits.keys(), reverse=True))
+            
+            if data.get('type') == 'depth' and data.get('variant') == 'physique':
+                first_fail = -1
+                for idx in sorted(bits.keys()):
+                    if bits[idx] == 1:
+                        first_fail = idx
+                        break
+                if first_fail != -1:
+                    fault_found = True
+                    fault_item = data['items'][first_fail]
+                    report_content.append(html.Div([
+                        html.Strong(f"Analyse Séquentielle : {phase}", style={'color': COLORS['accent']}),
+                        html.Ul([
+                            html.Li(f"Vecteur de balayage lu : {bit_str}"),
+                            html.Li([f"Déduction (1er blocage) : L'élément fautif => ", html.Span(fault_item, style={'color': COLORS['fail'], 'fontWeight': 'bold'})])
+                        ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
+                    ], style={'marginBottom': '10px'}))
+            else:
+                syndrome = sum(val * (2**idx) for idx, val in bits.items())
+                if syndrome > 0:
+                    fault_found = True
+                    if syndrome - 1 < len(data['items']):
+                        fault_item = data['items'][syndrome - 1]
+                        warning_text = ""
+                        if topo == 'arbre' and data.get('type') == 'depth' and data.get('variant') == 'theorique':
+                            warning_text = " (⚠️ Syndrome souvent faussé par le masquage physique !)"
+                    else:
+                        fault_item = f"Index {syndrome} INCONNU"
+                        warning_text = " (🚨 Matrice corrompue par l'effet de masquage !)"
+
+                    if topo == 'arbre' and data.get('type') == 'path':
+                        strate_stop = True 
+                        
+                    report_content.append(html.Div([
+                        html.Strong(f"Analyse Matrice : {phase}", style={'color': COLORS['accent']}),
+                        html.Ul([
+                            html.Li(f"Vecteur binaire lu (T_n ... T1) : {bit_str}"),
+                            html.Li([f"Déduction Théorique : L'élément fautif correspond à l'index {syndrome} => ", html.Span(fault_item, style={'color': COLORS['fail'], 'fontWeight': 'bold'}), html.Span(warning_text, style={'fontSize': '11px', 'color': '#C0392B'})])
+                        ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
+                    ], style={'marginBottom': '10px'}))
 
         if not fault_found and topo != 'arbre':
             report_content.append(html.P("Panne détectée par une sonde unitaire globale (Hors Matrice LTP).", style={'fontSize': '13px', 'fontStyle': 'italic'}))
@@ -288,11 +345,10 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
         if suspect_edges is not None:
             final_fault = suspect_edges - safe_edges
             report_content.append(html.Div([
-                html.Strong("Logique d'Intersection Spatiale (Théorie des Ensembles)", style={'color': COLORS['accent']}),
+                html.Strong("Logique d'Intersection Spatiale (Vérité Physique)", style={'color': COLORS['success']}),
                 html.Ul([
-                    html.Li("Arêtes suspectes isolées par le croisement strict des sondes en échec."),
                     html.Li("Soustraction des arêtes de routage validées par les sondes saines."),
-                    html.Li(f"Déduction finale : L'arête défaillante est {list(final_fault)}", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
+                    html.Li(f"Déduction finale absolue : L'arête défaillante est {list(final_fault)}", style={'color': COLORS['fail'], 'fontWeight': 'bold'})
                 ], style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px'})
             ]))
 
@@ -309,7 +365,7 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                 break
 
     return html.Div([
-        html.H4("🧠 Rapport du Contrôleur (Décodage Non-Adaptatif)", style={'marginTop': '0', 'borderBottom': '2px solid #ccc', 'paddingBottom': '5px', 'color': '#2C3E50'}),
+        html.H4("🧠 Rapport du Contrôleur (Décodage Top-Down)", style={'marginTop': '0', 'borderBottom': '2px solid #ccc', 'paddingBottom': '5px', 'color': '#2C3E50'}),
         html.P("Le contrôleur a collecté l'ensemble des statuts 0 et 1 pour effectuer ses calculs :", style={'fontSize': '12px', 'fontStyle': 'italic', 'color': '#7F8C8D'}),
         *report_content
     ], style={'backgroundColor': '#FDFEFE', 'padding': '15px', 'borderRadius': '5px', 'border': f"2px solid {COLORS['accent']}", 'marginTop': '20px'})
@@ -331,7 +387,7 @@ def _build_detailed_modal_content(results, topo, mode):
     if mode == 'ltp' and topo in ['complet', 'arbre', 'grille']:
         logic_steps.append(html.Div([
             html.P("💡 Comment fonctionne la matrice ?", style={'fontWeight': 'bold', 'color': COLORS['accent'], 'marginBottom': '5px'}),
-            html.P("Chaque sonde est comme une question posée au réseau. Si la sonde échoue, la réponse est '1'. Si elle réussit, la réponse est '0'. En mettant toutes ces réponses bout à bout, on obtient un mot binaire qui correspond exactement au numéro d'identification de la panne !", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'})
+            html.P("Chaque sonde est comme une question posée au réseau. Si la sonde échoue, la réponse est '1'. Si elle réussit, la réponse est '0'. En mettant toutes ces réponses bout à bout, on obtient un code d'identification.", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'})
         ]))
         
         phases = {}
@@ -339,31 +395,74 @@ def _build_detailed_modal_content(results, topo, mode):
             if 'ltp_meta' in res['probe'] and res['probe']['ltp_meta']:
                 meta = res['probe']['ltp_meta']
                 p = meta['phase']
-                if p not in phases: phases[p] = {'bits': {}, 'items': meta['items']}
+                if p not in phases: phases[p] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld'), 'variant': meta.get('variant')}
                 phases[p]['bits'][meta['active_test']] = 1 if res['failed'] else 0
         
         faulty_depth = None
         faulty_path_str = None
         fault_found = False
+        strate_stop = False
         
-        for phase, data in phases.items():
+        sorted_phases = []
+        if topo == 'arbre':
+            depth_phase = [p for p, d in phases.items() if d.get('type') == 'depth']
+            path_phases = sorted([p for p, d in phases.items() if d.get('type') == 'path'], key=lambda x: phases[x]['ld'])
+            sorted_phases = depth_phase + path_phases
+        else:
+            sorted_phases = list(phases.keys())
+        
+        for phase in sorted_phases:
+            data = phases[phase]
             bits = data['bits']
             if not bits: continue
-            calc_str = " + ".join([f"{val}*(2^{idx})" for idx, val in bits.items()])
-            syndrome = sum(val * (2**idx) for idx, val in bits.items())
+            
+            if topo == 'arbre' and data.get('type') == 'path' and strate_stop:
+                logic_steps.append(html.Div([
+                    html.H5(f"Analyse du groupe : {phase}", style={'color': '#95A5A6', 'margin': '10px 0 5px 0'}),
+                    html.P("🛑 Analyse Ignorée (Règle Top-Down) : La panne a été identifiée dans une strate supérieure. Les résultats de cette matrice inférieure sont faussés par le masquage physique, on les ignore.", style={'color': '#7F8C8D', 'fontStyle': 'italic', 'fontSize': '12px', 'margin': '0 0 10px 0'})
+                ]))
+                continue
+                
             bit_str = "".join(str(bits[i]) for i in sorted(bits.keys(), reverse=True))
             
-            if syndrome > 0:
-                fault_found = True
-                fault_res = f"La panne est l'élément N°{syndrome} (qui correspond à {data['items'][syndrome-1]})."
-                res_color = COLORS['fail']
-                
-                if phase == 'Profondeur Absolue': faulty_depth = data['items'][syndrome-1]
-                if phase == 'Chemins Préférés': faulty_path_str = data['items'][syndrome-1]
+            if data.get('type') == 'depth' and data.get('variant') == 'physique':
+                first_fail = -1
+                for idx in sorted(bits.keys()):
+                    if bits[idx] == 1:
+                        first_fail = idx
+                        break
+                if first_fail != -1:
+                    fault_found = True
+                    faulty_depth = data['items'][first_fail]
+                    fault_res = f"Premier blocage physique détecté à l'étape {first_fail} => {faulty_depth}."
+                    res_color = COLORS['fail']
+                    calc_str = "Recherche du 1er '1' (Évite l'Effet Cascade)"
+                else:
+                    fault_res = "Valeur 0 = Toutes les profondeurs sont saines."
+                    res_color = COLORS['success']
+                    calc_str = "N/A"
             else:
-                fault_res = "Valeur 0 = Aucun élément de ce groupe n'est en panne (Sain)."
-                res_color = COLORS['success']
-                
+                calc_str = " + ".join([f"{val}*(2^{idx})" for idx, val in bits.items()])
+                syndrome = sum(val * (2**idx) for idx, val in bits.items())
+                if syndrome > 0:
+                    fault_found = True
+                    if syndrome - 1 < len(data['items']):
+                        fault_item = data['items'][syndrome-1]
+                        fault_res = f"La panne théorique est l'élément N°{syndrome} ({fault_item})."
+                        res_color = COLORS['fail']
+                        if topo == 'arbre':
+                            if data.get('type') == 'depth': faulty_depth = fault_item
+                            if data.get('type') == 'path': 
+                                faulty_path_str = fault_item
+                                strate_stop = True
+                    else:
+                        fault_res = f"🚨 ERREUR MATRICE : Le syndrome {syndrome} est hors limites ! Le code binaire a été corrompu par le masquage physique du laser."
+                        res_color = COLORS['fail']
+                        faulty_depth = f"Index Inconnu ({syndrome})"
+                else:
+                    fault_res = "Valeur 0 = Aucun élément de ce groupe n'est en panne (Sain)."
+                    res_color = COLORS['success']
+
             phase_desc = ""
             if "Hub" in phase: phase_desc = " (Les connexions directes au centre)"
             elif "Cycle" in phase: phase_desc = " (Les connexions distantes entre voisins)"
@@ -373,14 +472,14 @@ def _build_detailed_modal_content(results, topo, mode):
             elif "Colonnes Globales" in phase: phase_desc = " (Groupement de colonnes entières)"
             elif "Échelle Vert" in phase: phase_desc = " (Groupement des k-ièmes arêtes horizontales)"
             elif "Échelle Horiz" in phase: phase_desc = " (Groupement des k-ièmes arêtes verticales)"
-            elif "Profondeur Absolue" in phase: phase_desc = " (Détection du niveau d'éloignement)"
-            elif "Chemins Préférés" in phase: phase_desc = " (Détection de l'autoroute HLD coupable)"
+            elif "Profondeur Absolue" in phase: phase_desc = " (Matrice LTP ou Diagonale)"
+            elif "Strate" in phase: phase_desc = " (Détection Top-Down de l'autoroute HLD)"
             
             logic_steps.append(html.Div([
                 html.H5([f"Analyse du groupe : {phase}", html.Span(phase_desc, style={'fontSize': '12px', 'color': '#7F8C8D', 'fontWeight': 'normal', 'marginLeft': '5px'})], style={'color': '#2C3E50', 'margin': '10px 0 5px 0', 'borderBottom': '1px dotted #ccc', 'paddingBottom': '5px'}),
                 html.Ul([
-                    html.Li([html.Strong("Réponses collectées (Code Binaire) : "), html.Span(bit_str, style={'fontFamily': 'monospace', 'backgroundColor': '#ecf0f1', 'padding': '2px 5px', 'borderRadius': '3px'})]),
-                    html.Li([html.Strong("Traduction en Décimal (Calcul) : "), calc_str + f" = {syndrome}"]),
+                    html.Li([html.Strong("Réponses collectées (Vecteur) : "), html.Span(bit_str, style={'fontFamily': 'monospace', 'backgroundColor': '#ecf0f1', 'padding': '2px 5px', 'borderRadius': '3px'})]),
+                    html.Li([html.Strong("Logique de Décodage : "), calc_str]),
                     html.Li([html.Strong("Conclusion : "), html.Span(fault_res, style={'fontWeight': 'bold', 'color': res_color})])
                 ], style={'fontSize': '13px', 'backgroundColor': '#f8f9fa', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px', 'listStyleType': 'square'})
             ]))
@@ -388,11 +487,11 @@ def _build_detailed_modal_content(results, topo, mode):
         if topo == 'arbre' and fault_found and faulty_depth and faulty_path_str:
             logic_steps.append(html.Div([
                 html.H5("📍 Détail du Croisement Exact (Heavy-Light Decomposition)", style={'color': COLORS['accent'], 'margin': '15px 0 5px 0', 'borderBottom': '1px solid #ccc'}),
-                html.P("Pour trouver la panne dans l'arbre sans se tromper, l'algorithme croise mathématiquement les 2 coordonnées :", style={'fontSize': '13px'}),
+                html.P("L'algorithme croise mathématiquement les 2 coordonnées théoriques :", style={'fontSize': '13px'}),
                 html.Ul([
-                    html.Li([html.Strong("Coordonnée Y (Niveau) : "), f"Le syndrome indique la {faulty_depth}."]),
+                    html.Li([html.Strong("Coordonnée Y (Niveau) : "), f"L'analyse indique la {faulty_depth}."]),
                     html.Li([html.Strong("Coordonnée X (Autoroute) : "), f"Le syndrome indique le {faulty_path_str}."]),
-                    html.Li([html.Strong("Déduction Mathématique : "), html.Span("L'arête en panne est le croisement unique (intersection) de cette Autoroute Préférée et de cette Profondeur Absolue !", style={'color': COLORS['fail'], 'fontWeight': 'bold'})])
+                    html.Li([html.Strong("Déduction Mathématique : "), html.Span("L'arête en panne est le croisement de cette Autoroute et de cette Profondeur.", style={'color': COLORS['fail'], 'fontWeight': 'bold'})])
                 ], style={'fontSize': '13px', 'backgroundColor': '#FDEDEC', 'padding': '10px 10px 10px 30px', 'borderRadius': '5px', 'listStyleType': 'none', 'borderLeft': '4px solid #C0392B'})
             ]))
 
@@ -442,8 +541,8 @@ def _build_detailed_modal_content(results, topo, mode):
             final_fault = suspect_edges - safe_edges
             
             logic_steps.append(html.Div([
-                html.P("💡 Trace Visuelle de l'Intersection", style={'fontWeight': 'bold', 'color': COLORS['accent'], 'marginBottom': '10px'}),
-                html.P("Voici comment l'algorithme a recoupé les chemins géométriques (les arêtes) étape par étape pour isoler la panne :", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'}),
+                html.P("💡 Trace Visuelle de l'Intersection Physique", style={'fontWeight': 'bold', 'color': COLORS['success'], 'marginBottom': '10px'}),
+                html.P("La théorie peut être faussée par la physique. Mais l'algorithme recoupe toujours les chemins géographiques étape par étape pour vérifier la vérité physique :", style={'fontSize': '13px', 'color': '#555', 'fontStyle': 'italic', 'marginBottom': '15px'}),
                 html.Div(intersection_trace, style={'backgroundColor': '#fff', 'padding': '15px', 'borderRadius': '5px', 'border': '1px solid #ddd', 'marginBottom': '15px'}),
                 html.Div([
                     html.Strong(f"✅ Phase d'Innocentation (Soustraction)"),
@@ -463,18 +562,19 @@ def _build_detailed_modal_content(results, topo, mode):
     ])
 
 class NetworkEngine:
-    def __init__(self, n, topo, mode='naif'):
+    def __init__(self, n, topo, mode='naif', tree_variant='theorique'):
         self.n = n
         self.type = topo
         self.mode = mode 
+        self.tree_variant = tree_variant # NOUVEAU: Choix Theorique vs Physique
         self.G = self._build_graph()
         self.probes = []
         
-        # Variables pour l'Arbre (Heavy-Light Decomposition)
         self.weights = {}
         self.heavy_edges = set()
         self.light_edges = set()
         self.preferred_paths = []
+        self.light_depth_of_path = {}
         
         if self.type == 'grille': self._generate_grid_algo()
         elif self.type == 'lineaire': self._generate_linear_algo()
@@ -600,9 +700,10 @@ class NetworkEngine:
         dfs_weight(0, None)
         
         self.preferred_paths = []
+        self.light_depth_of_path = {}
         visited = {0}
         
-        def extract_path(start_node, parent):
+        def extract_path(start_node, parent, current_ld):
             curr = start_node
             path = []
             if parent is not None: path.append(parent)
@@ -623,15 +724,17 @@ class NetworkEngine:
                     break
                     
             if len(path) > 1:
+                pid = len(self.preferred_paths)
                 self.preferred_paths.append(path)
+                self.light_depth_of_path[pid] = current_ld
                 
             for node in path:
                 if node == parent: continue
                 for v in self.G.neighbors(node):
                     if v not in visited:
-                        extract_path(v, node)
+                        extract_path(v, node, current_ld + 1)
                         
-        extract_path(0, None)
+        extract_path(0, None, 0)
         
         def get_dfs_route(target_edges):
             if not target_edges: return [0]
@@ -664,33 +767,54 @@ class NetworkEngine:
                 edges_by_depth[d].append((u, v))
                 
             depths = sorted(list(edges_by_depth.keys()))
-            ltp_depth = self._get_ltp_subsets(depths)
             
-            for idx, subset in enumerate(ltp_depth['subsets']):
-                if not subset: continue
-                t_edges = []
-                for d in subset: t_edges.extend(edges_by_depth[d])
-                
-                full_route = get_dfs_route(t_edges)
-                items_str = [f"Prof. {d}" for d in ltp_depth['items']]
-                meta = {'matrix': ltp_depth['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue'}
-                self._add_probe(full_route, f"DEPTH-{idx+1}", "LTP Profondeur", f"Sondage des arêtes aux profondeurs {subset}.", ltp_meta=meta, target_edges=t_edges)
+            # --- LE CHOIX DE LA VARIANTE POUR LA PROFONDEUR ---
+            if self.tree_variant == 'physique':
+                # Matrice diagonale (Anti-masquage)
+                matrix_depth = []
+                for i in range(len(depths)):
+                    row = [0] * len(depths)
+                    row[i] = 1
+                    matrix_depth.append(row)
+                for idx, d in enumerate(depths):
+                    t_edges = edges_by_depth[d]
+                    full_route = get_dfs_route(t_edges)
+                    items_str = [f"Prof. {d_item}" for d_item in depths]
+                    meta = {'matrix': matrix_depth, 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue', 'type': 'depth', 'variant': 'physique'}
+                    self._add_probe(full_route, f"DEPTH-{idx+1}", "Balayage Prof.", f"Sondage diag. de la Prof. {d}.", ltp_meta=meta, target_edges=t_edges)
+            else:
+                # LTP Théorique (Fidèle à l'article, sensible au masquage)
+                ltp_depth = self._get_ltp_subsets(depths)
+                for idx, subset in enumerate(ltp_depth['subsets']):
+                    if not subset: continue
+                    t_edges = []
+                    for d in subset: t_edges.extend(edges_by_depth[d])
+                    full_route = get_dfs_route(t_edges)
+                    items_str = [f"Prof. {d}" for d in ltp_depth['items']]
+                    meta = {'matrix': ltp_depth['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue', 'type': 'depth', 'variant': 'theorique'}
+                    self._add_probe(full_route, f"DEPTH-{idx+1}", "LTP Profondeur", f"Sondage O(log N) aux prof. {subset}.", ltp_meta=meta, target_edges=t_edges)
 
-            paths_ids = list(range(len(self.preferred_paths)))
-            ltp_paths = self._get_ltp_subsets(paths_ids)
-            
-            for idx, subset in enumerate(ltp_paths['subsets']):
-                if not subset: continue
-                t_edges = []
-                for pid in subset:
-                    path_nodes = self.preferred_paths[pid]
-                    for i in range(len(path_nodes)-1):
-                        t_edges.append((path_nodes[i], path_nodes[i+1]))
-                        
-                full_route = get_dfs_route(t_edges)
-                items_str = [f"Chemin {p}" for p in ltp_paths['items']]
-                meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Chemins Préférés'}
-                self._add_probe(full_route, f"HLD-{idx+1}", "LTP Chemins", f"Sondage des Chemins Préférés {subset}.", ltp_meta=meta, target_edges=t_edges)
+            paths_by_ld = {}
+            for pid, ld in self.light_depth_of_path.items():
+                if ld not in paths_by_ld: paths_by_ld[ld] = []
+                paths_by_ld[ld].append(pid)
+                
+            for ld in sorted(paths_by_ld.keys()):
+                pids = paths_by_ld[ld]
+                ltp_paths = self._get_ltp_subsets(pids)
+                
+                for idx, subset in enumerate(ltp_paths['subsets']):
+                    if not subset: continue
+                    t_edges = []
+                    for pid in subset:
+                        path_nodes = self.preferred_paths[pid]
+                        for i in range(len(path_nodes)-1):
+                            t_edges.append((path_nodes[i], path_nodes[i+1]))
+                            
+                    full_route = get_dfs_route(t_edges)
+                    items_str = [f"Chemin {p}" for p in ltp_paths['items']]
+                    meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': f'Strate {ld} (Chemins)', 'type': 'path', 'ld': ld}
+                    self._add_probe(full_route, f"HLD-L{ld}-{idx+1}", f"LTP Strate {ld}", f"Sondage des Chemins de la Strate {ld} : {subset}.", ltp_meta=meta, target_edges=t_edges)
 
     def _generate_grid_algo(self):
         s = int(math.sqrt(self.n))
@@ -871,6 +995,14 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                     {'label': ' LTP (Article - O(log N))', 'value': 'ltp'}
                 ], value='ltp', labelStyle={'display': 'block', 'margin': '5px 0'}),
 
+                html.Div(id='tree-variant-container', children=[
+                    html.Label("Variante Arbre (Diagnostic des profondeurs) :", style={'marginTop': '15px', 'display': 'block', 'fontWeight': 'bold', 'color': COLORS['fail']}),
+                    dcc.RadioItems(id='tree-variant', options=[
+                        {'label': ' Théorique (Article strict - Soumis au masquage)', 'value': 'theorique'},
+                        {'label': ' Pratique (Anti-masquage physique)', 'value': 'physique'}
+                    ], value='theorique', labelStyle={'display': 'block', 'margin': '5px 0', 'fontSize': '13px'}),
+                ], style={'display': 'block'}), 
+
                 html.Label("Taille du réseau (Nœuds) :", style={'marginTop': '15px', 'display': 'block'}),
                 dcc.Slider(id='n-slider', min=5, max=25, step=1, value=16, marks={5:'5', 10:'10', 16:'16', 25:'25'}),
                 
@@ -894,8 +1026,6 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
             ]),
             
             html.Div(id='algo-doc', style={'marginTop': '20px', 'fontSize': '13px', 'color': '#555'}),
-            
-            # --- NOUVEAU : Conteneur pour afficher les détails HLD dans l'interface ---
             html.Div(id='hld-details-display')
             
         ]),
@@ -908,7 +1038,7 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
             html.Div(style={'backgroundColor': COLORS['card'], 'marginTop': '20px', 'padding': '20px', 'borderRadius': '10px', 'display': 'flex', 'alignItems': 'center', 'gap': '15px', 'boxShadow': '0 2px 5px rgba(0,0,0,0.1)'}, children=[
                 html.Button("▶️ Lecture", id='btn-play', style={'backgroundColor': COLORS['success'], 'color': 'white', 'border': 'none', 'padding': '10px 20px', 'borderRadius': '5px', 'cursor': 'pointer', 'fontWeight': 'bold'}),
                 html.Div(style={'flex': '1'}, children=[
-                    dcc.Slider(id='sim-slider', min=1, max=1, step=1, value=1, tooltip={"placement": "bottom", "always_visible": True}, marks=None)
+                    dcc.Slider(id='sim-slider', min=0, max=1, step=1, value=0, tooltip={"placement": "bottom", "always_visible": True}, marks=None)
                 ]),
                 html.Div(id='counter-display', style={'fontWeight': 'bold', 'color': COLORS['text'], 'minWidth': '120px', 'textAlign': 'right'})
             ])
@@ -947,20 +1077,22 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('algo-doc', 'children'),
      Output('anim-interval', 'disabled'), 
      Output('btn-play', 'children'),
-     Output('hld-details-display', 'children')], # <-- NOUVEL OUTPUT POUR L'AFFICHAGE HLD
+     Output('hld-details-display', 'children'),
+     Output('tree-variant-container', 'style')],
     [Input('btn-build', 'n_clicks'), 
      Input('graph', 'clickData'), 
      Input('fault', 'value'),
      Input('sim-slider', 'value'), 
      Input('btn-play', 'n_clicks'), 
      Input('anim-interval', 'n_intervals'),
-     Input('algo-mode', 'value')],
+     Input('algo-mode', 'value'),
+     Input('tree-variant', 'value')],
     [State('topo', 'value'), 
      State('n-slider', 'value'), 
      State('st-topo', 'data'), 
      State('st-fault', 'data')]
 )
-def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, topo, n_nodes, st_t, st_f):
+def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, variant, topo, n_nodes, st_t, st_f):
     ctx_id = ctx.triggered_id
     fig = go.Figure()
     anim_disabled = True
@@ -970,17 +1102,18 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
     modal_content_html = html.Div()
     hld_details_html = html.Div()
     
-    if ctx_id in ['btn-build', 'algo-mode', None] or not st_t:
+    variant_style = {'display': 'block'} if topo == 'arbre' else {'display': 'none'}
+
+    if ctx_id in ['btn-build', 'algo-mode', 'tree-variant', None] or not st_t:
         n_final = int(math.sqrt(n_nodes))**2 if topo == 'grille' else n_nodes
-        st_t = {'n': n_final, 'type': topo, 'mode': mode}
-        st_f, f_val, s_val = None, None, 1
+        st_t = {'n': n_final, 'type': topo, 'mode': mode, 'variant': variant}
+        st_f, f_val, s_val = None, None, 0
     
     if st_f and isinstance(st_f[0], list): st_f = sorted((tuple(st_f[0]), tuple(st_f[1])), key=str)
 
-    eng = NetworkEngine(st_t['n'], st_t['type'], mode=st_t.get('mode', 'ltp'))
+    eng = NetworkEngine(st_t['n'], st_t['type'], mode=st_t.get('mode', 'ltp'), tree_variant=st_t.get('variant', 'theorique'))
     opts = [{'label': f"Lien {u} - {v}", 'value': str(sorted((u, v), key=str))} for u,v in eng.G.edges()]
     
-    # --- GÉNÉRATION DU NOUVEAU PANNEAU HLD ---
     if st_t['type'] == 'arbre' and hasattr(eng, 'preferred_paths') and eng.preferred_paths:
         paths_divs = []
         for i, p in enumerate(eng.preferred_paths):
@@ -998,37 +1131,37 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
             html.Ul(paths_divs, style={'margin': '5px 0', 'paddingLeft': '20px', 'fontSize': '13px', 'fontFamily': 'monospace'})
         ], style={'backgroundColor': '#E8F8F5', 'padding': '15px', 'borderRadius': '5px', 'marginTop': '15px', 'border': f"1px solid {COLORS['success']}"})
 
-
     if ctx_id == 'graph' and click:
         try:
             p = click['points'][0]['customdata']
             st_f = sorted([tuple(p[0]), tuple(p[1])], key=str) if st_t['type'] == 'grille' else sorted(p, key=str)
-            f_val, s_val = str(st_f), 1
+            f_val, s_val = str(st_f), 0
         except: pass
     elif ctx_id == 'fault' and f_val:
         try:
             v = ast.literal_eval(f_val)
             st_f = sorted([tuple(v[0]), tuple(v[1])], key=str) if st_t['type'] == 'grille' else sorted(v, key=str)
-            s_val = 1
+            s_val = 0
         except: pass
 
     results = eng.run_simulation(st_f)
-    max_s = max(len(results), 1)
-    if s_val is None or s_val > max_s: s_val = 1
+    max_s = len(results)
+    
+    if s_val is None or s_val > max_s: s_val = 0
 
     if ctx_id == 'btn-play':
         anim_disabled = False
-        if s_val >= max_s: s_val = 1
+        if s_val >= max_s: s_val = 1 
     elif ctx_id == 'anim-interval':
         if s_val < max_s:
             s_val += 1
-            if results[s_val - 1]['failed']: anim_disabled, btn_text = True, "▶️ Reprendre"
+            if s_val > 0 and results[s_val - 1]['failed']: anim_disabled, btn_text = True, "▶️ Reprendre"
             else: anim_disabled, btn_text = False, "⏸️ Stop"
         else: anim_disabled, btn_text = True, "↺ Reset"
     
     if anim_disabled:
-        if s_val >= max_s: btn_text = "↺ Reset"
-        elif s_val > 1 and results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
+        if s_val >= max_s and max_s > 0: btn_text = "↺ Reset"
+        elif s_val > 0 and results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
         else: btn_text = "▶️ Lecture"
     else: btn_text = "⏸️ Stop"
 
@@ -1067,7 +1200,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
             fig.add_trace(go.Scatter(x=[(fx0+fx1)/2], y=[(fy0+fy1)/2], mode='markers', marker=dict(symbol='x', size=15, color=COLORS['fail'])))
         except: pass
 
-    if results:
+    if results and s_val > 0:
         curr = results[s_val - 1]
         probe, is_failed = curr['probe'], curr['failed']
         path = probe['path']
@@ -1115,7 +1248,17 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
                 style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'}
             )
     else:
-        step_content = [html.P("Aucune sonde générée.", style={'color': '#7F8C8D'})]
+        step_content = [
+            html.Div([html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.Span("0 - Initialisation", style={'fontWeight': 'bold', 'color': COLORS['text']})]),
+            html.Div([html.Span("DESCRIPTION : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.P("Topologie générée. Observez la structure du réseau (arêtes lourdes/légères) avant d'envoyer les sondes.", style={'fontSize': '14px', 'margin': '5px 0'})])
+        ]
+        matrix_html = html.Div()
+        math_details_html = html.Div()
+        path_html = html.Div()
+        diagnosis_html = html.Div(
+            "Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...",
+            style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'}
+        )
 
     node_texts = []
     for n in eng.G.nodes():
@@ -1129,7 +1272,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, t
 
     fig.update_layout(margin=dict(l=20,r=20,t=20,b=20), xaxis={'visible':False}, yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':1 if st_t['type']=='grille' else None}, plot_bgcolor=COLORS['bg'], showlegend=False)
 
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text, hld_details_html
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text, hld_details_html, variant_style
 
 @app.callback(
     Output('modal-overlay', 'style'),
