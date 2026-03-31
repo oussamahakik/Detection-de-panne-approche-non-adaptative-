@@ -29,5 +29,5 @@ Assurez-vous d'avoir [Python 3.8+](https://www.python.org/downloads/) installé 
 
 1. **Clonez le dépôt ou téléchargez les fichiers :**
    ```bash
-   git clone [https://github.com/votre-nom/simulateur-diagnostic-optique.git](https://github.com/votre-nom/simulateur-diagnostic-optique.git)
+   git clone https://github.com/oussamahakik/Detection-de-panne-approche-non-adaptative-.git
    cd simulateur-diagnostic-optique
