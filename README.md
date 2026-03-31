@@ -29,5 +29,20 @@ Assurez-vous d'avoir [Python 3.8+](https://www.python.org/downloads/) installé 
 
 1. **Clonez le dépôt ou téléchargez les fichiers :**
    ```bash
-   git clone [https://github.com/votre-nom/simulateur-diagnostic-optique.git](https://github.com/votre-nom/simulateur-diagnostic-optique.git)
+   git clone https://github.com/oussamahakik/Detection-de-panne-approche-non-adaptative-.git
    cd simulateur-diagnostic-optique
+
+2. **Étape 2 : Créer un environnement virtuel (Recommandé) :**
+Il est conseillé de créer un environnement isolé pour éviter les conflits de dépendances avec vos autres projets Python
+   ```bash
+      python -m venv venv
+3. **Étape 3 : Activer l'environnement virtuel :**
+   ```bash
+      venv\Scripts\activate (sur windows)
+      source venv/bin/activate (sur linux)
+4. **Étape 4 : Installer les dépendances :**
+   ```bash
+      pip install -r requirements.txt
+6. **Lancer le simulateur :**
+   ```bash
+      python3 gen2.py
