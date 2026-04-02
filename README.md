@@ -30,7 +30,7 @@ Assurez-vous d'avoir [Python 3.8+](https://www.python.org/downloads/) installé 
 1. **Clonez le dépôt ou téléchargez les fichiers :**
    ```bash
    git clone https://github.com/oussamahakik/Detection-de-panne-approche-non-adaptative-.git
-   cd simulateur-diagnostic-optique
+   cd Detection-de-panne-approche-non-adaptative
 
 2. **Étape 2 : Créer un environnement virtuel (Recommandé) :**
 Il est conseillé de créer un environnement isolé pour éviter les conflits de dépendances avec vos autres projets Python
