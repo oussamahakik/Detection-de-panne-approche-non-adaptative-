@@ -1,6 +1,5 @@
 dash
 plotly
 networkx
-math
-ast
-re
+numpy
+scipy
