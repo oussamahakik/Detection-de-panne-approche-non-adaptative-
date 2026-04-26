@@ -1312,10 +1312,3 @@ def toggle_modal(n_open, n_close):
 if __name__ == '__main__':
     app.run(debug=True)
 
-    """
-        Question : je ne comprends pas pourquoi dans la partie pour les arbres
-        generalement dans l'article on suit un mode static alors eux decrivent une approche 
-        dynamique qui semble plus robuste au masquage(la partie ou ils parlent d'envoyer des sondes)
-        profondeur par pronfondeur (For each depth d ∈ [0, D − 1] , probe the sub-tree containing
-the root and all nodes up to depth d .) ici je ne sais pas si on doit appliquer LTP ou pas ?
-    """
