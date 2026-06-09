@@ -267,7 +267,6 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                     phases[phase] = {'bits': {}, 'items': meta['items'], 'type': meta.get('type'), 'ld': meta.get('ld', 0), 'variant': meta.get('variant')}
                 phases[phase]['bits'][meta['active_test']] = 1 if res['failed'] else 0
         
-        # Tri Top-Down pour l'arbre
         sorted_phases = []
         if topo == 'arbre':
             depth_phase = [p for p, d in phases.items() if d.get('type') == 'depth']
@@ -313,7 +312,7 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
                         fault_item = data['items'][syndrome - 1]
                         warning_text = ""
                         if topo == 'arbre' and data.get('variant') == 'theorique':
-                            warning_text = " (⚠️ Syndrome souvent faussé par le masquage physique !)"
+                            warning_text = " (⚠️ Syndrome faussé par le masquage physique !)"
                     else:
                         fault_item = f"Index {syndrome} INCONNU"
                         warning_text = " (🚨 Matrice corrompue par l'effet de masquage !)"
@@ -371,7 +370,6 @@ def _build_diagnosis_report(results, topo, mode, fault_exists):
         html.P("Le contrôleur a collecté l'ensemble des statuts 0 et 1 pour effectuer ses calculs :", style={'fontSize': '12px', 'fontStyle': 'italic', 'color': '#7F8C8D'}),
         *report_content
     ], style={'backgroundColor': '#FDFEFE', 'padding': '15px', 'borderRadius': '5px', 'border': f"2px solid {COLORS['accent']}", 'marginTop': '20px'})
-
 
 def _build_detailed_modal_content(results, topo, mode):
     probe_list = []
@@ -569,7 +567,7 @@ class NetworkEngine:
         self.n = n
         self.type = topo
         self.mode = mode 
-        self.tree_variant = tree_variant # NOUVEAU: Choix Theorique vs Physique
+        self.tree_variant = tree_variant 
         self.G = self._build_graph()
         self.probes = []
         
@@ -771,9 +769,7 @@ class NetworkEngine:
                 
             depths = sorted(list(edges_by_depth.keys()))
             
-            # --- LE CHOIX DE LA VARIANTE POUR LA PROFONDEUR ---
             if self.tree_variant == 'physique':
-                # Matrice diagonale (Anti-masquage)
                 matrix_depth = []
                 for i in range(len(depths)):
                     row = [0] * len(depths)
@@ -786,7 +782,6 @@ class NetworkEngine:
                     meta = {'matrix': matrix_depth, 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue', 'type': 'depth', 'variant': 'physique'}
                     self._add_probe(full_route, f"DEPTH-{idx+1}", "Balayage Prof.", f"Sondage diag. de la Prof. {d}.", ltp_meta=meta, target_edges=t_edges)
             else:
-                # LTP Théorique (Fidèle à l'article, sensible au masquage)
                 ltp_depth = self._get_ltp_subsets(depths)
                 for idx, subset in enumerate(ltp_depth['subsets']):
                     if not subset: continue
@@ -797,7 +792,6 @@ class NetworkEngine:
                     meta = {'matrix': ltp_depth['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Profondeur Absolue', 'type': 'depth', 'variant': 'theorique'}
                     self._add_probe(full_route, f"DEPTH-{idx+1}", "LTP Profondeur", f"Sondage O(log N) aux prof. {subset}.", ltp_meta=meta, target_edges=t_edges)
 
-            # --- LE CHOIX DE LA VARIANTE POUR LES CHEMINS (AXE X) ---
             if self.tree_variant == 'physique':
                 paths_by_ld = {}
                 for pid, ld in self.light_depth_of_path.items():
@@ -821,7 +815,6 @@ class NetworkEngine:
                         meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': f'Strate {ld} (Chemins)', 'type': 'path', 'ld': ld, 'variant': 'physique'}
                         self._add_probe(full_route, f"HLD-L{ld}-{idx+1}", f"LTP Strate {ld}", f"Sondage des Chemins de la Strate {ld} : {subset}.", ltp_meta=meta, target_edges=t_edges)
             else:
-                # Mode Théorique : UNE SEULE matrice LTP pour TOUS les chemins (Strict respect de l'article)
                 all_pids = list(range(len(self.preferred_paths)))
                 ltp_paths = self._get_ltp_subsets(all_pids)
                 
@@ -837,7 +830,6 @@ class NetworkEngine:
                     items_str = [f"Chemin {p}" for p in ltp_paths['items']]
                     meta = {'matrix': ltp_paths['matrix'], 'items': items_str, 'active_test': idx, 'phase': 'Chemins Préférés (Global)', 'type': 'path', 'ld': 0, 'variant': 'theorique'}
                     self._add_probe(full_route, f"HLD-GL-{idx+1}", "LTP Chemins", f"Sondage O(log P) de tous les chemins : {subset}.", ltp_meta=meta, target_edges=t_edges)
-
 
     def _generate_grid_algo(self):
         s = int(math.sqrt(self.n))
@@ -1018,6 +1010,12 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
                     {'label': ' LTP (Article - O(log N))', 'value': 'ltp'}
                 ], value='ltp', labelStyle={'display': 'block', 'margin': '5px 0'}),
 
+                html.Label("Mode d'Affichage :", style={'marginTop': '15px', 'display': 'block', 'fontWeight': 'bold', 'color': COLORS['success']}),
+                dcc.RadioItems(id='anim-mode', options=[
+                    {'label': ' Statique (Chemin complet)', 'value': 'statique'},
+                    {'label': ' Animé (Voyage fluide du laser)', 'value': 'anime'}
+                ], value='statique', labelStyle={'display': 'block', 'margin': '5px 0', 'fontSize': '13px'}),
+
                 html.Div(id='tree-variant-container', children=[
                     html.Label("Variante Arbre (Diagnostic des profondeurs) :", style={'marginTop': '15px', 'display': 'block', 'fontWeight': 'bold', 'color': COLORS['fail']}),
                     dcc.RadioItems(id='tree-variant', options=[
@@ -1076,7 +1074,10 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
         ])
     ]),
 
-    dcc.Store(id='st-topo'), dcc.Store(id='st-fault'),
+    dcc.Store(id='st-topo'), 
+    dcc.Store(id='st-fault'), 
+    dcc.Store(id='st-node-idx', data=0),
+    dcc.Store(id='st-anim-progress', data=0.0), # NOUVEAU: Pour l'interpolation fluide
     dcc.Interval(id='anim-interval', interval=1000, n_intervals=0, disabled=True)
 ])
 
@@ -1101,7 +1102,10 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Output('anim-interval', 'disabled'), 
      Output('btn-play', 'children'),
      Output('hld-details-display', 'children'),
-     Output('tree-variant-container', 'style')],
+     Output('tree-variant-container', 'style'),
+     Output('st-node-idx', 'data'),
+     Output('st-anim-progress', 'data'), # NOUVEAU
+     Output('anim-interval', 'interval')],
     [Input('btn-build', 'n_clicks'), 
      Input('graph', 'clickData'), 
      Input('fault', 'value'),
@@ -1109,13 +1113,16 @@ app.layout = html.Div(style={'backgroundColor': COLORS['bg'], 'minHeight': '100v
      Input('btn-play', 'n_clicks'), 
      Input('anim-interval', 'n_intervals'),
      Input('algo-mode', 'value'),
-     Input('tree-variant', 'value')],
+     Input('tree-variant', 'value'),
+     Input('anim-mode', 'value')],
     [State('topo', 'value'), 
      State('n-slider', 'value'), 
      State('st-topo', 'data'), 
-     State('st-fault', 'data')]
+     State('st-fault', 'data'),
+     State('st-node-idx', 'data'),
+     State('st-anim-progress', 'data')] # NOUVEAU
 )
-def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, variant, topo, n_nodes, st_t, st_f):
+def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, variant, anim_mode, topo, n_nodes, st_t, st_f, st_node_idx, st_progress):
     ctx_id = ctx.triggered_id
     fig = go.Figure()
     anim_disabled = True
@@ -1125,12 +1132,14 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
     modal_content_html = html.Div()
     hld_details_html = html.Div()
     
+    interval_speed = 80 if anim_mode == 'anime' else 1000 # 50ms = 20 fps pour la fluidité
     variant_style = {'display': 'block'} if topo == 'arbre' else {'display': 'none'}
+    step_size = 0.25 # On fait avancer la ligne de 25% à chaque 50ms
 
-    if ctx_id in ['btn-build', 'algo-mode', 'tree-variant', None] or not st_t:
+    if ctx_id in ['btn-build', 'algo-mode', 'tree-variant', 'anim-mode', None] or not st_t:
         n_final = int(math.sqrt(n_nodes))**2 if topo == 'grille' else n_nodes
         st_t = {'n': n_final, 'type': topo, 'mode': mode, 'variant': variant}
-        st_f, f_val, s_val = None, None, 0
+        st_f, f_val, s_val, st_node_idx, st_progress = None, None, 0, 0, 0.0
     
     if st_f and isinstance(st_f[0], list): st_f = sorted((tuple(st_f[0]), tuple(st_f[1])), key=str)
 
@@ -1141,10 +1150,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
         paths_divs = []
         for i, p in enumerate(eng.preferred_paths):
             paths_divs.append(html.Li(f"Chemin {i} : {' ➔ '.join(map(str, p))}"))
-        
         h_edges = [f"{u}-{v}" for u,v in eng.heavy_edges]
         l_edges = [f"{u}-{v}" for u,v in eng.light_edges]
-
         hld_details_html = html.Div([
             html.H4("🌳 Détails de la Décomposition Lourd-Léger", style={'color': COLORS['accent'], 'marginTop': '0', 'borderBottom': '1px solid #ccc', 'paddingBottom': '5px'}),
             html.P("Ceci est la cartographie exacte générée par l'algorithme :", style={'fontSize': '12px', 'color': '#7F8C8D', 'fontStyle': 'italic'}),
@@ -1158,33 +1165,78 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
         try:
             p = click['points'][0]['customdata']
             st_f = sorted([tuple(p[0]), tuple(p[1])], key=str) if st_t['type'] == 'grille' else sorted(p, key=str)
-            f_val, s_val = str(st_f), 0
+            f_val, s_val, st_node_idx, st_progress = str(st_f), 0, 0, 0.0
         except: pass
     elif ctx_id == 'fault' and f_val:
         try:
             v = ast.literal_eval(f_val)
             st_f = sorted([tuple(v[0]), tuple(v[1])], key=str) if st_t['type'] == 'grille' else sorted(v, key=str)
-            s_val = 0
+            s_val, st_node_idx, st_progress = 0, 0, 0.0
         except: pass
 
     results = eng.run_simulation(st_f)
     max_s = len(results)
-    
     if s_val is None or s_val > max_s: s_val = 0
 
+    if ctx_id == 'sim-slider':
+        st_node_idx = len(results[s_val-1]['probe']['path']) - 1 if s_val > 0 else 0
+        st_progress = 0.0
+
     if ctx_id == 'btn-play':
+        if s_val >= max_s: 
+            s_val, st_node_idx, st_progress = 1, 0, 0.0
+        elif s_val == 0 and max_s > 0:
+            s_val, st_node_idx, st_progress = 1, 0, 0.0
         anim_disabled = False
-        if s_val >= max_s: s_val = 1 
     elif ctx_id == 'anim-interval':
-        if s_val < max_s:
-            s_val += 1
-            if s_val > 0 and results[s_val - 1]['failed']: anim_disabled, btn_text = True, "▶️ Reprendre"
-            else: anim_disabled, btn_text = False, "⏸️ Stop"
-        else: anim_disabled, btn_text = True, "↺ Reset"
+        if anim_mode == 'statique':
+            if s_val < max_s:
+                s_val += 1
+                st_node_idx, st_progress = 0, 0.0
+                if results[s_val - 1]['failed']: anim_disabled, btn_text = True, "▶️ Reprendre"
+                else: anim_disabled, btn_text = False, "⏸️ Stop"
+            else: anim_disabled, btn_text = True, "↺ Reset"
+        else: # anim_mode == 'anime' (Interpolation fluide)
+            if s_val == 0:
+                if max_s > 0:
+                    s_val, st_node_idx, st_progress = 1, 0, 0.0
+                    anim_disabled, btn_text = False, "⏸️ Stop"
+                else: anim_disabled, btn_text = True, "▶️ Lecture"
+            else:
+                path = results[s_val - 1]['probe']['path']
+                if st_node_idx < len(path) - 1:
+                    u, v = path[st_node_idx], path[st_node_idx+1]
+                    is_failed_edge = (str(tuple(sorted((u, v), key=str))) == str(st_f))
+                    
+                    if is_failed_edge and st_progress >= 0.5:
+                        # On arrête la sonde net au milieu de l'arête coupée !
+                        anim_disabled, btn_text = True, "▶️ Reprendre"
+                    else:
+                        st_progress += step_size
+                        if st_progress >= 1.0:
+                            st_progress = 0.0
+                            st_node_idx += 1
+                            if st_node_idx >= len(path) - 1:
+                                if s_val < max_s:
+                                    s_val += 1
+                                    st_node_idx = 0
+                                    anim_disabled, btn_text = False, "⏸️ Stop"
+                                else:
+                                    anim_disabled, btn_text = True, "↺ Reset"
+                            else:
+                                anim_disabled, btn_text = False, "⏸️ Stop"
+                        else:
+                            anim_disabled, btn_text = False, "⏸️ Stop"
     
+    # Gestion du texte du bouton Pause/Lecture
     if anim_disabled:
         if s_val >= max_s and max_s > 0: btn_text = "↺ Reset"
-        elif s_val > 0 and results[s_val-1]['failed']: btn_text = "▶️ Reprendre"
+        elif s_val > 0 and results[s_val-1]['failed'] and anim_mode == 'statique': btn_text = "▶️ Reprendre"
+        elif s_val > 0 and anim_mode == 'anime' and st_node_idx < len(results[s_val-1]['probe']['path'])-1:
+            u, v = results[s_val-1]['probe']['path'][st_node_idx], results[s_val-1]['probe']['path'][st_node_idx+1]
+            if str(tuple(sorted((u, v), key=str))) == str(st_f) and st_progress >= 0.5:
+                btn_text = "▶️ Reprendre"
+            else: btn_text = "▶️ Lecture"
         else: btn_text = "▶️ Lecture"
     else: btn_text = "⏸️ Stop"
 
@@ -1194,6 +1246,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
     elif st_t['type'] == 'arbre': pos = nx.kamada_kawai_layout(eng.G)
     elif st_t['type'] == 'complet': pos = nx.circular_layout(eng.G)
 
+    # Tracé de base du graphe
     if st_t['type'] == 'arbre' and hasattr(eng, 'heavy_edges'):
         hx, hy, lx, ly = [], [], [], []
         for u, v in eng.G.edges():
@@ -1201,10 +1254,8 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
                 hx.extend([pos[u][0], pos[v][0], None]); hy.extend([pos[u][1], pos[v][1], None])
             else:
                 lx.extend([pos[u][0], pos[v][0], None]); ly.extend([pos[u][1], pos[v][1], None])
-        
         fig.add_trace(go.Scatter(x=hx, y=hy, mode='lines', line=dict(color='#2C3E50', width=4), hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=lx, y=ly, mode='lines', line=dict(color='#BDC3C7', width=2, dash='dot'), hoverinfo='skip'))
-        
         for u, v in eng.G.edges():
             fig.add_trace(go.Scatter(x=[pos[u][0], pos[v][0], None], y=[pos[u][1], pos[v][1], None], mode='lines', line=dict(width=15, color='rgba(0,0,0,0)'), hoverinfo='text', text=f"Lien {u}-{v}", customdata=[[u,v],[u,v],[u,v]], showlegend=False))
     else:
@@ -1215,6 +1266,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
             fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], mode='lines', line=dict(width=15, color='rgba(0,0,0,0)'), hoverinfo='text', text=f"Lien {u}-{v}", customdata=[[u,v],[u,v],[u,v]], showlegend=False))
         fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode='lines', line=dict(color=COLORS['edge_inactive'], width=2), hoverinfo='skip'))
 
+    # Affichage de la panne (rouge)
     if st_f:
         try:
             u_f, v_f = st_f
@@ -1226,12 +1278,10 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
     if results and s_val > 0:
         curr = results[s_val - 1]
         probe, is_failed = curr['probe'], curr['failed']
-        path = probe['path']
+        full_path = probe['path']
         
         test_idx = probe.get('ltp_meta', {}).get('active_test', (s_val - 1)) if probe.get('ltp_meta') else (s_val - 1)
         dynamic_color = PROBE_COLORS[test_idx % len(PROBE_COLORS)]
-        
-        px, py = [pos[n][0] for n in path], [pos[n][1] for n in path]
         
         highlighted_edges = _get_highlighted_edges(probe, st_t['type'])
         for highlighted_edge in highlighted_edges:
@@ -1241,35 +1291,75 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
                 fig.add_trace(go.Scatter(x=[hx0, hx1], y=[hy0, hy1], mode='lines', line=dict(width=9, color='#E74C3C'), opacity=0.8, hoverinfo='skip', showlegend=False))
             except: pass
 
-        fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=dynamic_color), opacity=0.9))
-        
-        if st_t['type'] in ['grille', 'lineaire']:
-            fig.layout.annotations = _build_probe_step_annotations(path, pos, dynamic_color)
-        
-        if len(path) > 1:
-            fig.add_trace(go.Scatter(x=[px[0]], y=[py[0]], mode='markers', marker=dict(size=12, color=dynamic_color, symbol='circle')))
-            fig.add_trace(go.Scatter(x=[px[len(path)//2]], y=[py[len(path)//2]], mode='markers', marker=dict(size=10, color=dynamic_color, symbol='triangle-up')))
+        # --- DESSIN DU CHEMIN DYNAMIQUE (INTERPOLATION FLUIDE) ---
+        if anim_mode == 'anime' and len(full_path) > 0 and st_node_idx < len(full_path) - 1:
+            u = full_path[st_node_idx]
+            v = full_path[st_node_idx + 1]
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            
+            # Calcul précis du point intermédiaire
+            curr_x = x0 + (x1 - x0) * st_progress
+            curr_y = y0 + (y1 - y0) * st_progress
+            
+            # Dessine le chemin DEJA validé
+            path_to_draw = full_path[:st_node_idx + 1]
+            px, py = [pos[n][0] for n in path_to_draw], [pos[n][1] for n in path_to_draw]
+            
+            # Ajoute le bout de ligne en train d'être traversé
+            px.append(curr_x)
+            py.append(curr_y)
+            
+            fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=dynamic_color), opacity=0.9))
+            
+            # L'étoile jaune fluo (la sonde) qui glisse
+            fig.add_trace(go.Scatter(
+                x=[curr_x], y=[curr_y], 
+                mode='markers', 
+                marker=dict(size=20, color='#F1C40F', symbol='star', line=dict(width=2, color='#D35400')), 
+                name='Sonde Laser', hoverinfo='name'
+            ))
+        else:
+            # Mode Statique ou Animation terminée pour cette sonde
+            px, py = [pos[n][0] for n in full_path], [pos[n][1] for n in full_path]
+            fig.add_trace(go.Scatter(x=px, y=py, mode='lines', line=dict(width=4, color=dynamic_color), opacity=0.9))
 
-        status_col = COLORS['fail'] if is_failed else COLORS['success']
+        if st_t['type'] in ['grille', 'lineaire'] and len(full_path) > 0:
+            fig.layout.annotations = _build_probe_step_annotations(full_path, pos, dynamic_color)
+        
+        if len(full_path) > 1:
+            fig.add_trace(go.Scatter(x=[pos[full_path[0]][0]], y=[pos[full_path[0]][1]], mode='markers', marker=dict(size=12, color=dynamic_color, symbol='circle')))
+
+        is_currently_failed = False
+        if is_failed:
+            if anim_mode == 'statique':
+                is_currently_failed = True
+            elif st_node_idx >= len(full_path) - 1:
+                is_currently_failed = True
+            elif st_node_idx < len(full_path) - 1:
+                u, v = full_path[st_node_idx], full_path[st_node_idx+1]
+                if str(tuple(sorted((u, v), key=str))) == str(st_f) and st_progress >= 0.5:
+                    is_currently_failed = True
+
+        status_col = COLORS['fail'] if is_currently_failed else COLORS['success']
+        display_status = "❌ ÉCHEC (Sonde Bloquée)" if is_currently_failed else "✅ EN COURS..." if anim_mode == 'anime' and st_node_idx < len(full_path)-1 else "✅ SUCCÈS"
+        
         step_content = [
             html.Div([html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.Span(f"{probe['step_id']} - {probe['step_name']}", style={'fontWeight': 'bold', 'color': dynamic_color})]),
             html.Div([html.Span("DESCRIPTION : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.P(probe['description'], style={'fontSize': '14px', 'margin': '5px 0'})]),
-            html.Div(style={'backgroundColor': 'white', 'padding': '10px', 'borderLeft': f'5px solid {status_col}'}, children=[html.Span("STATUT : ", style={'fontWeight': 'bold', 'fontSize': '12px'}), html.Span("❌ ÉCHEC" if is_failed else "✅ SUCCÈS", style={'fontWeight': 'bold', 'color': status_col})])
+            html.Div(style={'backgroundColor': 'white', 'padding': '10px', 'borderLeft': f'5px solid {status_col}'}, children=[html.Span("STATUT : ", style={'fontWeight': 'bold', 'fontSize': '12px'}), html.Span(display_status, style={'fontWeight': 'bold', 'color': status_col})])
         ]
         
         matrix_html = _build_matrix_html(probe.get('ltp_meta'))
         math_details_html = _build_math_details_html(probe.get('ltp_meta'), st_t['type'])
-        path_html = _build_path_html(path, dynamic_color)
+        path_html = _build_path_html(full_path, dynamic_color)
 
-        if s_val == max_s:
+        if s_val == max_s and (anim_mode == 'statique' or st_node_idx >= len(full_path) - 1):
             diagnosis_html = _build_diagnosis_report(results, st_t['type'], st_t.get('mode', 'naif'), st_f is not None)
             modal_btn_style = {'display': 'block'} 
             modal_content_html = _build_detailed_modal_content(results, st_t['type'], st_t.get('mode', 'naif')) 
         else:
-            diagnosis_html = html.Div(
-                "Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...",
-                style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'}
-            )
+            diagnosis_html = html.Div("Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...", style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'})
     else:
         step_content = [
             html.Div([html.Span("ÉTAPE : ", style={'fontWeight': 'bold', 'color': '#7F8C8D', 'fontSize': '12px'}), html.Span("0 - Initialisation", style={'fontWeight': 'bold', 'color': COLORS['text']})]),
@@ -1278,10 +1368,7 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
         matrix_html = html.Div()
         math_details_html = html.Div()
         path_html = html.Div()
-        diagnosis_html = html.Div(
-            "Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...",
-            style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'}
-        )
+        diagnosis_html = html.Div("Le rapport de diagnostic mathématique sera généré à la fin de la séquence de test...", style={'backgroundColor': '#f8f9fa', 'padding': '15px', 'borderRadius': '5px', 'color': '#7F8C8D', 'fontStyle': 'italic', 'textAlign': 'center', 'marginTop': '20px', 'border': '1px dashed #ccc'})
 
     node_texts = []
     for n in eng.G.nodes():
@@ -1292,23 +1379,23 @@ def update_simulation(b_build, click, f_val, s_val, b_play, n_intervals, mode, v
 
     nxp, nyp = [pos[n][0] for n in eng.G.nodes()], [pos[n][1] for n in eng.G.nodes()]
     fig.add_trace(go.Scatter(x=nxp, y=nyp, mode='markers+text', text=node_texts, textposition="top center", textfont=dict(color=COLORS['text'], size=9), marker=dict(size=15, color='white', line=dict(width=2, color=COLORS['text'])), hoverinfo='none'))
-
     fig.update_layout(margin=dict(l=20,r=20,t=20,b=20), xaxis={'visible':False}, yaxis={'visible':False, 'scaleanchor':'x', 'scaleratio':1 if st_t['type']=='grille' else None}, plot_bgcolor=COLORS['bg'], showlegend=False)
 
-    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text, hld_details_html, variant_style
+    return fig, st_t, st_f, opts, f_val, max_s, s_val, step_content, matrix_html, math_details_html, path_html, diagnosis_html, modal_btn_style, modal_content_html, f"Total Sondes : {max_s} | Pos : {s_val}", ALGO_DOCS.get(st_t['type'], ""), anim_disabled, btn_text, hld_details_html, variant_style, st_node_idx, st_progress, interval_speed
 
 @app.callback(
     Output('modal-overlay', 'style'),
-    [Input('btn-open-modal', 'n_clicks'),
-     Input('btn-close-modal', 'n_clicks')],
+    [Input('btn-open-modal', 'n_clicks'), Input('btn-close-modal', 'n_clicks')],
     prevent_initial_call=True
 )
 def toggle_modal(n_open, n_close):
-    ctx_id = ctx.triggered_id
-    if ctx_id == 'btn-open-modal':
-        return {'display': 'block', 'position': 'fixed', 'zIndex': 1000, 'left': 0, 'top': 0, 'width': '100%', 'height': '100%', 'backgroundColor': 'rgba(0,0,0,0.6)'}
+    if ctx.triggered_id == 'btn-open-modal': return {'display': 'block', 'position': 'fixed', 'zIndex': 1000, 'left': 0, 'top': 0, 'width': '100%', 'height': '100%', 'backgroundColor': 'rgba(0,0,0,0.6)'}
     return {'display': 'none'}
 
 if __name__ == '__main__':
+<<<<<<< HEAD
     app.run(debug=True)
 
+=======
+    app.run(debug=True)
+>>>>>>> fa15e27 (add animation)
