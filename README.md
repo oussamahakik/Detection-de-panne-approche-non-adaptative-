@@ -7,12 +7,12 @@
 
 Application web interactive permettant de simuler, visualiser et analyser le diagnostic de pannes (liens coupés) dans les réseaux tout-optiques. Ce projet implémente et compare des approches de diagnostic naïves et des stratégies avancées basées sur le **Combinatorial Group Testing (CGT)** avec une complexité de sondage logarithmique.
 
-## 📖 À propos du projet
+##  À propos du projet
 
 Dans les réseaux optiques, tester chaque câble un par un prend un temps linéaire ($O(N)$). Ce simulateur démontre comment le *Combinatorial Group Testing* (ou procédure LTP) permet d'envoyer des sondes (lasers) qui traversent plusieurs arêtes simultanément pour identifier une panne unique avec un minimum de tests, s'approchant d'une complexité de **$O(\log N)$**.
 
 
-## ✨ Fonctionnalités Principales
+##  Fonctionnalités Principales
 
 * **4 Topologies de Réseau supportées :**
   * **Linéaire :** Algorithme de la fenêtre glissante.
@@ -23,7 +23,7 @@ Dans les réseaux optiques, tester chaque câble un par un prend un temps linéa
 * **Moteur d'Animation Fluide :** Visualisez le trajet exact de la sonde grâce à une interpolation linéaire (mouvement continu du laser de nœud en nœud) et observez le blocage en temps réel lors du crash sur une arête défaillante.
 * **Rapport de Diagnostic Mathématique :** Génération automatique d'un rapport détaillant les matrices binaires, les syndromes calculés, et la déduction spatiale par théorie des ensembles (Innocentation et Règle du goulot d'étranglement).
 
-## 🛠️ Prérequis et Installation
+##  Prérequis et Installation
 
 Assurez-vous d'avoir [Python 3.8+](https://www.python.org/downloads/) installé sur votre machine.
 
